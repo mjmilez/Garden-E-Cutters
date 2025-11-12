@@ -1,0 +1,5 @@
+using the arduino ide extension on VSCode. 
+make a new project, enable the I2C and USART peripherals, using other boards, 
+rp2040 has master/slave capabilities used to emulate the ZED-F9P
+upload the Fake-ZED-F9P.c file contents to the main.c file and run. That should work
+still needs to debugged. 
