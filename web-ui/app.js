@@ -1,23 +1,21 @@
 // ----- Dummy data -----
 const dummyCuts = [
   {
+    date: "2025-11-13",
     time: "10:32 AM",
     lat: 35.9981,
     lon: -85.7500,
-    forceN: 212.4,
-    fixType: "RTK Fixed",
-    horizAcc: 0.01
+    forceN: 212.4
   },
   {
-    time: "10:31 AM",
+    date: "2025-11-13",
+    time: "10:29 AM",
     lat: 35.9807,
     lon: -85.7495,
-    forceN: 219.0,
-    fixType: "RTK Float",
-    horizAcc: 0.12
-  },
-  // add more rows as needed
+    forceN: 219.0
+  }
 ];
+
 
 // ----- Initial UI setup -----
 function initDashboard() {
@@ -32,20 +30,21 @@ function initDashboard() {
 
   // Populate log table
   const tbody = document.getElementById("cut-log-body");
+  tbody.innerHTML = ""; // clear existing rows
   dummyCuts.forEach(cut => {
     const tr = document.createElement("tr");
 
     tr.innerHTML = `
+      <td>${cut.date}</td>
       <td>${cut.time}</td>
       <td>${cut.lat.toFixed(6)}</td>
       <td>${cut.lon.toFixed(6)}</td>
       <td>${cut.forceN.toFixed(1)}</td>
-      <td>${cut.fixType}</td>
-      <td>${cut.horizAcc.toFixed(3)}</td>
     `;
 
     tbody.appendChild(tr);
   });
+
 
   // Tab switching
   const tabButtons = document.querySelectorAll(".tab-button");
