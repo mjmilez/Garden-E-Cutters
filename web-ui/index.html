@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Garden E-Cutters Dashboard</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <!-- Top bar -->
+  <header id="top-bar">
+    <h1>GARDEN E-CUTTERS</h1>
+    <div id="status-bar">
+      <span id="connection-status-dot"></span>
+      <span id="connection-status-text">Disconnected from Shears</span>
+      <span id="total-cuts-label">Total Cuts:</span>
+      <span id="total-cuts-value">0</span>
+    </div>
+  </header>
+
+  <!-- Tabs -->
+  <nav id="tabs">
+    <button class="tab-button active" data-tab="log-tab">Logs</button>
+    <button class="tab-button" data-tab="map-tab">Map</button>
+  </nav>
+
+  <!-- Tab content containers -->
+  <main>
+    <section id="log-tab" class="tab-content active">
+      <!-- Filters -->
+      <div id="log-filters">
+        <button id="filter-button">Filter</button>
+
+        <label>
+          Force Threshold:
+          <input type="range" id="force-threshold-slider" min="0" max="300" value="100" />
+          <span id="force-threshold-value">100 N</span>
+        </label>
+
+        <label>
+          Timestamp Range:
+          <input type="date" id="timestamp-start" />
+          <input type="date" id="timestamp-end" />
+        </label>
+
+        <label>
+          GPS Fix Type:
+          <select id="gps-fix-type-select">
+            <option value="all">All</option>
+            <option value="single">Single</option>
+            <option value="float">RTK Float</option>
+            <option value="fixed">RTK Fixed</option>
+          </select>
+        </label>
+      </div>
+
+      <!-- Log table -->
+      <table id="cut-log-table">
+        <thead>
+          <tr>
+            <th>Time</th>
+            <th>Latitude</th>
+            <th>Longitude</th>
+            <th>Force (N)</th>
+            <th>Fix Type</th>
+            <th>Horizontal Accuracy (m)</th>
+          </tr>
+        </thead>
+        <tbody id="cut-log-body">
+          <!-- JS will inject dummy rows here -->
+        </tbody>
+      </table>
+    </section>
+
+    <section id="map-tab" class="tab-content">
+      <div id="map-container">
+        <!-- Later: embed real map; for now dummy placeholder -->
+        <p id="map-placeholder">Map view coming soon (dummy data).</p>
+      </div>
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>
