@@ -99,21 +99,25 @@ nav#tabs {
   display: flex;
   align-items: stretch;
   background-color: #e5e7eb;
-  padding: 0.25rem 1.5rem 0;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+  padding: 0;                 /* no inner padding so tabs can use full width */
 }
 
+/* each tab takes up 50% of the bar */
 .tab-button {
+  flex: 1 1 0;
   border: none;
   background: transparent;
-  padding: 0.6rem 1.25rem;
-  margin-right: 0.5rem;
+  margin: 0;                  /* IMPORTANT: remove any margin-left/right */
+  padding: 0.75rem 0;
   font-size: 0.95rem;
   font-weight: 500;
   color: #4b5563;
   border-radius: 0.5rem 0.5rem 0 0;
   cursor: pointer;
-  transition: background-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+  text-align: center;         /* center the label in each tab */
+  transition: background-color 0.15s ease,
+              color 0.15s ease,
+              box-shadow 0.15s ease;
 }
 
 .tab-button:hover {
@@ -126,6 +130,7 @@ nav#tabs {
   color: #065f46;
   box-shadow: 0 -1px 0 0 #f9fafb, 0 -2px 0 0 #065f46;
 }
+
 
 /* ===== Main Content ===== */
 
@@ -158,6 +163,7 @@ main {
 /* Filters row */
 #log-filters {
   display: flex;
+  justify-content: center;
   flex-wrap: wrap;
   align-items: center;
   gap: 1rem;
@@ -262,26 +268,36 @@ main {
 }
 
 #map-container {
+  position: relative;
   width: 100%;
-  min-height: 350px;
+  aspect-ratio: 2047 / 1032;   /* <- NEW: lock container to same ratio as image */
   border-radius: 0.75rem;
   background-color: #111827;
-  position: relative;
+  background-image: url("gnv_pic.png");
+  background-size: 100% 100%;  /* now safe: no distortion because ratios match */
+  background-position: center;
   overflow: hidden;
   box-shadow: 0 1px 3px rgba(0,0,0,0.2);
 }
 
-/* Placeholder text before real map is integrated */
-#map-placeholder {
+
+/* overlay where we draw markers */
+#map-overlay {
   position: absolute;
   inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: #e5e7eb;
-  font-size: 1rem;
-  text-align: center;
-  padding: 1rem;
+}
+
+/* individual cut marker */
+.map-marker {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background-color: #22c55e;          /* green dot */
+  border: 2px solid #f9fafb;
+  transform: translate(-50%, -50%);   /* center on coordinate */
+  box-shadow: 0 0 4px rgba(0,0,0,0.7);
+  pointer-events: none;               /* markers don’t block clicks */
 }
 
 /* ===== Responsive Tweaks ===== */
@@ -299,7 +315,12 @@ main {
   }
 
   nav#tabs {
-    padding: 0.25rem 1rem 0;
+    display: flex;
+    align-items: stretch;
+    background-color: #e5e7eb;
+    padding: 0.25rem 1.5rem 0;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+    gap: 0.25rem;
   }
 
   main {
@@ -323,7 +344,16 @@ main {
   }
 
   .tab-button {
-    padding: 0.5rem 0.85rem;
-    font-size: 0.85rem;
+    flex: 1 1 0;              /* each tab takes up half the width */
+    border: none;
+    background: transparent;
+    padding: 0.6rem 1.25rem;
+    font-size: 0.95rem;
+    font-weight: 500;
+    color: #4b5563;
+    border-radius: 0.5rem 0.5rem 0 0;
+    cursor: pointer;
+    text-align: center;        /* center label in each tab */
+    transition: background-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
   }
 }

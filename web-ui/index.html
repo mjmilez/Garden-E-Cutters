@@ -29,7 +29,6 @@
       <!-- Filters -->
       <div id="log-filters">
         <button id="filter-button">Filter</button>
-
         <label>
           Force Threshold:
           <input type="range" id="force-threshold-slider" min="0" max="300" value="100" />
@@ -40,16 +39,6 @@
           Timestamp Range:
           <input type="date" id="timestamp-start" />
           <input type="date" id="timestamp-end" />
-        </label>
-
-        <label>
-          GPS Fix Type:
-          <select id="gps-fix-type-select">
-            <option value="all">All</option>
-            <option value="single">Single</option>
-            <option value="float">RTK Float</option>
-            <option value="fixed">RTK Fixed</option>
-          </select>
         </label>
       </div>
 
@@ -72,8 +61,8 @@
 
     <section id="map-tab" class="tab-content">
       <div id="map-container">
-        <!-- Later: embed real map; for now dummy placeholder -->
-        <p id="map-placeholder">Map view coming soon (dummy data).</p>
+        <!-- Background image is applied via CSS -->
+        <div id="map-overlay"></div>
       </div>
     </section>
   </main>
