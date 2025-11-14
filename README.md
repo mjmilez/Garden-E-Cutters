@@ -1,58 +1,147 @@
-# Garden-E-Cutters
+# Garden E‑Cutters Firmware (BLE-v1)
 
-## Overview
-The E-Cutter project is a agriculture system designed to record cutting events in a watermelon field using **GPS-RTK-based geolocation**. The system uses real time positional data, sensor feedback, and a local data logging pipeline to track when and where each cut occurs.
----
-
-## Completed work
-- Researched and evaluated multiple geolocation methods (**GPS**, **DGPS**, **UWB**, **RTK**) based on accuracy and cost.
-- Finalized **GPS-RTK** as the primary geolocation solution!!!
-- Designed system architecture defining three major layers:
-  - **External Interface:** RTK receiver, dashboard, and data entry points.
-  - **Internal Systems:** State management (waiting for cut / cut event occurring), data processing, and signal handling.
-  - **Persistent State:** Local database for event storage using CSV format.
-- Documented all architectural decisions and design trade-offs.
+This branch contains the first working BLE link between the **shears** and the **base station**.  
+Both devices run ESP-IDF with the NimBLE stack and implement the foundational communication layer for the E‑Cutters system.  
+The goal of BLE‑v1 is to establish a stable connection, define the structure for future data exchange, and prepare for telemetry transport.
 
 ---
 
-## System architecture
-The system is composed of three major subsystems:
+## High‑Level Overview
 
-1. **External interface**
-   - **Cut Tool:** The RTK receiver detects when a cut occurs and serves as the data entry point.
-   - **Dashboard:** Displays real-time data and logged events using a local map (e.g., Google Maps).
+### Shears Firmware (Peripheral)
+The shears firmware runs as a **BLE peripheral** that:
+- Advertises as `WM-SHEARS`
+- Publishes a primary BLE service (`0xFFF0`)
+- Accepts incoming connections from the base station
+- Restarts advertising automatically if the connection is lost
 
-2. **Internal systems**
-   - Manages system states:  
-     - *Waiting for Cut* – monitors trigger conditions (force sensor, contact switch, or shear detection).  
-     - *Cut Event Occurring* – records and transmits event data.
-   - Handles real-time detection, state transitions, and data packaging.
-   - Connects external inputs to persistent storage.
+A status LED is connected to **GPIO33**:
+- Fast blink while advertising / waiting for a connection  
+- Solid on when connected  
+- Returns to blinking after disconnect  
 
-3. **Persistent state**
-   - Local CSV based database hosted on the hub device.
-   - Stores the following parameters for each cut event:
-     - Timestamp  
-     - Latitude / Longitude / Altitude  
-     - Fix Type (single, float, fixed)  
-     - Horizontal Accuracy
-   - Ensures reliable data access for dashboard visualization and future analytics.
+This LED gives immediate visual feedback on the BLE link state.
 
-**Data flow:**  
-RTK Receiver → Internal Processing → Local Database → Dashboard Visualization
+The shears currently do **not** send telemetry yet, but the structure is ready for the next step:
+- A fixed-size telemetry struct
+- A characteristic for data publishing
+- A periodic task to generate and push packets through notify once implemented
 
 ---
 
-## Known bugs / limitations
-- The WiFi vs. no WiFi network configuration is still under evaluation.
+### Base Firmware (Central)
+The base station firmware runs as a **BLE central** that:
+- Scans continuously for devices named `WM-SHEARS`
+- Filters advertisement packets by device name
+- Initiates a BLE connection when the shears are discovered
+- Restarts scanning automatically if the link fails or drops
 
+The base also uses **GPIO33** for a status LED:
+- Fast blink while scanning / connecting  
+- Solid on when connected to the shears  
+
+This matches the shears’ LED behavior and helps confirm link status.
+
+The base currently performs:
+- Active scanning
+- Name-based filtering
+- Manual connect attempts
+- Logging of discovered and connected devices
+
+Telemetry discovery and notification handling will be added in the next milestone.
 
 ---
 
-## Next steps
-- Finalize network communication design (Wi-Fi vs. local base station).
-- Implement real time data synchronization between RTK receiver and dashboard.
-- Integrate physical sensors for automatic cut detection.
-- End to end and field validation testing.
-- Full integration testing between the RTK module, microcontroller, and local database still needs to be done.
+## Next Steps for BLE-v1 → BLE-v2
+
+The next development step is adding **real, structured communication**.  
+The plan is already defined:
+
+### 1. Define a telemetry record
+Example structure:
+
+```c
+typedef struct {
+    uint8_t  version;
+    uint16_t seq;
+    uint32_t timestamp_ms;
+    int16_t  force;
+    int16_t  position;
+    uint8_t  battery_pct;
+    uint8_t  flags;
+} __attribute__((packed)) shears_telemetry_t;
+```
+
+For BLE‑v1 → BLE‑v2 transition, a simplified version will be used for bring-up.
+
+### 2. Add a GATT characteristic on the shears
+- Service UUID: `0xFFF0` (already advertising)
+- Telemetry Characteristic UUID: `0xFFF1`
+- Properties: `READ | NOTIFY`
+
+### 3. Shears: periodic telemetry task
+- Update struct fields (e.g., increment `seq`)
+- Send notify if connected + notifications enabled
+
+### 4. Base: service + characteristic discovery
+- Discover `0xFFF0` service and `0xFFF1` characteristic
+- Enable notifications through CCCD
+- Log incoming packets
+
+This forms the **shears → base** telemetry channel.
+
+After this is stable, a command/control characteristic (`0xFFF2`) can be added for base → shears messages.
+
 ---
+
+## Current Project Structure
+
+```
+BLE-v1/
+├── shears-fw/
+│   ├── main/
+│   │   └── main.c
+│   └── README.md
+├── base-fw/
+│   ├── main/
+│   │   └── main.c
+│   └── README.md
+└── README.md   <-- (this file)
+```
+
+---
+
+## Build & Flash (Both Firmware Targets)
+
+Activate ESP-IDF first.
+
+### Build
+```bash
+idf.py build
+```
+
+### Flash (example)
+```bash
+idf.py -p COM5 flash
+```
+
+### Monitor
+```bash
+idf.py -p COM5 monitor
+```
+
+---
+
+## Summary
+
+BLE-v1 establishes:
+- Reliable BLE discovery
+- Central ↔ Peripheral connection flow
+- Automatic reconnection logic
+- Status LEDs on both devices
+- Advertising + scanning foundation
+- Initial layout for future GATT services
+- Clear roadmap for telemetry communication
+
+This branch now forms the baseline for the full BLE data link used in the Garden E‑Cutters system.
+
