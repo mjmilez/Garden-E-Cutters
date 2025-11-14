@@ -8,6 +8,11 @@
 
 #include "driver/gpio.h"
 
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+
+#include "driver/gpio.h"
+
 #include "nimble/nimble_port.h"
 #include "nimble/nimble_port_freertos.h"
 
@@ -18,6 +23,8 @@
 #include "services/gatt/ble_svc_gatt.h"
 
 static const char *TAG = "shears_ble";
+
+#define SHEARS_STATUS_LED_GPIO GPIO_NUM_33
 
 #define SHEARS_STATUS_LED_GPIO GPIO_NUM_33
 
@@ -102,9 +109,11 @@ static void startAdvertising(void) {
 
 	uint16_t serviceUuid = 0xFFF0;
 	ble_uuid16_t uuid16 = {
+	ble_uuid16_t uuid16 = {
 	    .u = { .type = BLE_UUID_TYPE_16 },
 	    .value = serviceUuid
 	};
+	fields.uuids16 = &uuid16;
 	fields.uuids16 = &uuid16;
 	fields.num_uuids16 = 1;
 	fields.uuids16_is_complete = 1;
@@ -121,15 +130,22 @@ static void startAdvertising(void) {
 	advParams.conn_mode = BLE_GAP_CONN_MODE_UND;
 	advParams.disc_mode = BLE_GAP_DISC_MODE_GEN;
 
+	advParams.conn_mode = BLE_GAP_CONN_MODE_UND;
+	advParams.disc_mode = BLE_GAP_DISC_MODE_GEN;
+
+	rc = ble_gap_adv_start(ownAddrType, NULL, BLE_HS_FOREVER,
+	                       &advParams, gapEventHandler, NULL);
 	rc = ble_gap_adv_start(ownAddrType, NULL, BLE_HS_FOREVER,
 	                       &advParams, gapEventHandler, NULL);
 	if (rc != 0) {
 		ESP_LOGE(TAG, "Error starting advertising, rc=%d", rc);
 	} else {
 		ESP_LOGI(TAG, "Advertising as \"%s\" (connectable)", deviceName);
+		ESP_LOGI(TAG, "Advertising as \"%s\" (connectable)", deviceName);
 	}
 }
 
+/* Called when NimBLE host is synced */
 /* Called when NimBLE host is synced */
 static void onSync(void) {
 	int rc = ble_hs_id_infer_auto(0, &ownAddrType);
@@ -146,12 +162,21 @@ static void onSync(void) {
 }
 
 /* Host task */
+/* Host task */
 static void hostTask(void *param) {
+	nimble_port_run();
+	nimble_port_freertos_deinit();
 	nimble_port_run();
 	nimble_port_freertos_deinit();
 }
 
 void app_main(void) {
+	esp_err_t ret = nvs_flash_init();
+	if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+		ESP_ERROR_CHECK(nvs_flash_erase());
+		ret = nvs_flash_init();
+	}
+	ESP_ERROR_CHECK(ret);
 	esp_err_t ret = nvs_flash_init();
 	if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
 		ESP_ERROR_CHECK(nvs_flash_erase());
@@ -180,6 +205,12 @@ void app_main(void) {
 
 	ble_svc_gap_init();
 	ble_svc_gatt_init();
+	ble_hs_cfg.sync_cb = onSync;
+	ble_hs_cfg.reset_cb = NULL;
 
+	ble_svc_gap_init();
+	ble_svc_gatt_init();
+
+	nimble_port_freertos_init(hostTask);
 	nimble_port_freertos_init(hostTask);
 }
