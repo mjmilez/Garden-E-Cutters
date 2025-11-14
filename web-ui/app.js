@@ -148,14 +148,35 @@ function updateMap(cuts) {
 
     marker.addEventListener("mouseenter", () => {
       tooltip.textContent = tooltipText;
-      tooltip.style.left = marker.style.left;
-      tooltip.style.top = marker.style.top;
       tooltip.style.opacity = 1;
+
+      // Force layout so we can measure tooltip size
+      tooltip.style.display = "block";
+
+      const containerRect = container.getBoundingClientRect();
+      const markerRect = marker.getBoundingClientRect();
+      const tooltipRect = tooltip.getBoundingClientRect();
+
+      // Marker position relative to container
+      const markerCenterX =
+        markerRect.left + markerRect.width / 2 - containerRect.left;
+      const markerTopY = markerRect.top - containerRect.top;
+
+      // Clamp tooltip horizontally so it stays fully inside the container
+      const padding = 4; // small margin from edges
+      let left = markerCenterX - tooltipRect.width / 2;
+      const minLeft = padding;
+      const maxLeft = containerRect.width - tooltipRect.width - padding;
+      left = Math.max(minLeft, Math.min(maxLeft, left));
+
+      tooltip.style.left = `${left}px`;
+      tooltip.style.top = `${markerTopY}px`;
     });
 
     marker.addEventListener("mouseleave", () => {
       tooltip.style.opacity = 0;
     });
+
 
     overlay.appendChild(marker);
   });
