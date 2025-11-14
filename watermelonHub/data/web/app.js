@@ -4,22 +4,34 @@ const MAP_BOUNDS = {
   minLon: -82.37238690307114,    // left edge  (most negative longitude)
   maxLon: -82.33946281502358     // right edge (least negative longitude)
 };
-// ----- Dummy data -----
+
+// ----- Data storage -----
 let dummyCuts = [];
 
+// ----- ESP32 Integration -----
 async function fetchCutsFromESP() {
   try {
     const response = await fetch('/api/cuts');
     const data = await response.json();
     
     // Convert your ESP32 data format to match their expected format
-    dummyCuts = data.map(cut => ({
-      date: new Date(cut.timestamp * 1000).toISOString().split('T')[0],
-      time: new Date(cut.timestamp * 1000).toLocaleTimeString('en-US', {hour: '2-digit', minute:'2-digit'}),
-      lat: cut.lat,
-      lon: cut.lon,
-      forceN: cut.force * 9.81  // Convert kg to Newtons
-    }));
+    dummyCuts = data.map(cut => {
+      const dateObj = new Date(cut.timestamp * 1000);
+      
+      // Format as MM/DD/YYYY
+      const month = String(dateObj.getMonth() + 1).padStart(2, '0');
+      const day = String(dateObj.getDate()).padStart(2, '0');
+      const year = dateObj.getFullYear();
+      const formattedDate = `${month}/${day}/${year}`;
+      
+      return {
+        date: formattedDate,  // Now in MM/DD/YYYY format
+        time: dateObj.toLocaleTimeString('en-US', {hour: '2-digit', minute:'2-digit'}),
+        lat: cut.lat,
+        lon: cut.lon,
+        forceN: cut.force * 9.81  // Convert kg to Newtons
+      };
+    });
     
     // Update whichever view is active
     const activeTab = document.querySelector('.tab-content.active');
@@ -34,7 +46,6 @@ async function fetchCutsFromESP() {
     
   } catch (error) {
     console.error('Failed to fetch cuts:', error);
-    // Keep existing dummy data as fallback
   }
 }
 
@@ -59,19 +70,23 @@ function getFilteredCuts() {
   const endInput = document.getElementById("timestamp-end");
 
   const minForce = Number(forceSlider.value);
-  const startValue = startInput.value; // "YYYY-MM-DD" or ""
+  const startValue = startInput.value; // "YYYY-MM-DD" from HTML date input
   const endValue = endInput.value;
 
   return dummyCuts
     .filter(cut => cut.forceN >= minForce)
     .filter(cut => {
       if (!startValue && !endValue) return true;
-      const d = cut.date; // already "YYYY-MM-DD"
-      if (startValue && d < startValue) return false;
-      if (endValue && d > endValue) return false;
+      
+      // Convert MM/DD/YYYY to YYYY-MM-DD for comparison
+      const [month, day, year] = cut.date.split('/');
+      const cutDateFormatted = `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
+      
+      if (startValue && cutDateFormatted < startValue) return false;
+      if (endValue && cutDateFormatted > endValue) return false;
       return true;
     })
-    .sort((a, b) => toSortKey(b).localeCompare(toSortKey(a))); // latest first
+    .sort((a, b) => toSortKey(b).localeCompare(toSortKey(a)));
 }
 
 // ----- Table rendering -----
@@ -112,19 +127,26 @@ function normalizeDateRange() {
   }
 }
 
+// ----- Map rendering with TOOLTIP feature -----
 function updateMap(cuts) {
   const overlay = document.getElementById("map-overlay");
   const container = document.getElementById("map-container");
   const totalCutsValue = document.getElementById("total-cuts-value");
+  const tooltip = document.getElementById("map-tooltip");
 
   if (!overlay || !container) return;
 
   overlay.innerHTML = "";
   totalCutsValue.textContent = cuts.length.toString();
+  
+  // Handle tooltip if it exists (new feature)
+  if (tooltip) {
+    tooltip.style.opacity = 0;
+  }
+
   if (!cuts.length) return;
 
   const { minLat, maxLat, minLon, maxLon } = MAP_BOUNDS;
-
   const latSpan = maxLat - minLat || 0.0001;
   const lonSpan = maxLon - minLon || 0.0001;
 
@@ -132,14 +154,57 @@ function updateMap(cuts) {
     const lat = Math.min(Math.max(cut.lat, minLat), maxLat);
     const lon = Math.min(Math.max(cut.lon, minLon), maxLon);
 
-    const xRel = (lon - minLon) / lonSpan;        // 0–1 left→right
-    const yRel = 1 - (lat - minLat) / latSpan;    // 0–1 top→bottom
+    const xRel = (lon - minLon) / lonSpan;      // 0–1 left→right
+    const yRel = 1 - (lat - minLat) / latSpan;  // 0–1 top→bottom
 
     const marker = document.createElement("div");
     marker.className = "map-marker";
     marker.style.left = `${xRel * 100}%`;
     marker.style.top = `${yRel * 100}%`;
-    marker.title = `${cut.date} ${cut.time} | ${cut.forceN.toFixed(1)} N`;
+
+    // Add tooltip functionality if tooltip element exists
+    if (tooltip) {
+      const tooltipText =
+        `${cut.date} ${cut.time}\n` +
+        `Lat: ${cut.lat.toFixed(6)}\n` +
+        `Lon: ${cut.lon.toFixed(6)}\n` +
+        `Force: ${cut.forceN.toFixed(1)} N`;
+
+      marker.addEventListener("mouseenter", () => {
+        tooltip.textContent = tooltipText;
+        tooltip.style.opacity = 1;
+
+        // Force layout so we can measure tooltip size
+        tooltip.style.display = "block";
+
+        const containerRect = container.getBoundingClientRect();
+        const markerRect = marker.getBoundingClientRect();
+        const tooltipRect = tooltip.getBoundingClientRect();
+
+        // Marker position relative to container
+        const markerCenterX =
+          markerRect.left + markerRect.width / 2 - containerRect.left;
+        const markerTopY = markerRect.top - containerRect.top;
+
+        // Clamp tooltip horizontally so it stays fully inside the container
+        const padding = 4; // small margin from edges
+        let left = markerCenterX - tooltipRect.width / 2;
+        const minLeft = padding;
+        const maxLeft = containerRect.width - tooltipRect.width - padding;
+        left = Math.max(minLeft, Math.min(maxLeft, left));
+
+        tooltip.style.left = `${left}px`;
+        tooltip.style.top = `${markerTopY}px`;
+      });
+
+      marker.addEventListener("mouseleave", () => {
+        tooltip.style.opacity = 0;
+      });
+    } else {
+      // Fallback to title attribute if no tooltip element
+      marker.title = `${cut.date} ${cut.time} | ${cut.forceN.toFixed(1)} N`;
+    }
+
     overlay.appendChild(marker);
   });
 }
@@ -157,16 +222,15 @@ function initFiltersDefaults() {
 }
 
 function initDashboard() {
-
-  // ADD: Fetch real data on load
+  // Fetch real data on load
   fetchCutsFromESP();
 
-  // ADD: Auto-refresh every 5 seconds
+  // Auto-refresh every 5 seconds
   setInterval(() => {
     fetchCutsFromESP();
   }, 5000);
 
-  // Status bar - pretend we connected successfully
+  // Status bar
   const statusDot = document.getElementById("connection-status-dot");
   const statusText = document.getElementById("connection-status-text");
   const totalCutsValue = document.getElementById("total-cuts-value");
@@ -181,9 +245,6 @@ function initDashboard() {
       statusDot.classList.remove("connected");
       statusText.textContent = "Disconnected from Hub";
     });
-
-  statusDot.classList.add("connected");
-  statusText.textContent = "Connected to Shears";
 
   // Tabs
   const tabButtons = document.querySelectorAll(".tab-button");
@@ -212,8 +273,6 @@ function initDashboard() {
       }
     });
   });
-
-
 
   // Filters
   const forceSlider = document.getElementById("force-threshold-slider");

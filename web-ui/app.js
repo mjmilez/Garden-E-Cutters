@@ -114,15 +114,17 @@ function updateMap(cuts) {
   const overlay = document.getElementById("map-overlay");
   const container = document.getElementById("map-container");
   const totalCutsValue = document.getElementById("total-cuts-value");
+  const tooltip = document.getElementById("map-tooltip");
 
-  if (!overlay || !container) return;
+  if (!overlay || !container || !tooltip) return;
 
   overlay.innerHTML = "";
   totalCutsValue.textContent = cuts.length.toString();
+  tooltip.style.opacity = 0;
+
   if (!cuts.length) return;
 
   const { minLat, maxLat, minLon, maxLon } = MAP_BOUNDS;
-
   const latSpan = maxLat - minLat || 0.0001;
   const lonSpan = maxLon - minLon || 0.0001;
 
@@ -130,17 +132,56 @@ function updateMap(cuts) {
     const lat = Math.min(Math.max(cut.lat, minLat), maxLat);
     const lon = Math.min(Math.max(cut.lon, minLon), maxLon);
 
-    const xRel = (lon - minLon) / lonSpan;        // 0–1 left→right
-    const yRel = 1 - (lat - minLat) / latSpan;    // 0–1 top→bottom
+    const xRel = (lon - minLon) / lonSpan;      // 0–1 left→right
+    const yRel = 1 - (lat - minLat) / latSpan;  // 0–1 top→bottom
 
     const marker = document.createElement("div");
     marker.className = "map-marker";
     marker.style.left = `${xRel * 100}%`;
     marker.style.top = `${yRel * 100}%`;
-    marker.title = `${cut.date} ${cut.time} | ${cut.forceN.toFixed(1)} N`;
+
+    const tooltipText =
+      `${cut.date} ${cut.time}\n` +
+      `Lat: ${cut.lat.toFixed(6)}\n` +
+      `Lon: ${cut.lon.toFixed(6)}\n` +
+      `Force: ${cut.forceN.toFixed(1)} N`;
+
+    marker.addEventListener("mouseenter", () => {
+      tooltip.textContent = tooltipText;
+      tooltip.style.opacity = 1;
+
+      // Force layout so we can measure tooltip size
+      tooltip.style.display = "block";
+
+      const containerRect = container.getBoundingClientRect();
+      const markerRect = marker.getBoundingClientRect();
+      const tooltipRect = tooltip.getBoundingClientRect();
+
+      // Marker position relative to container
+      const markerCenterX =
+        markerRect.left + markerRect.width / 2 - containerRect.left;
+      const markerTopY = markerRect.top - containerRect.top;
+
+      // Clamp tooltip horizontally so it stays fully inside the container
+      const padding = 4; // small margin from edges
+      let left = markerCenterX - tooltipRect.width / 2;
+      const minLeft = padding;
+      const maxLeft = containerRect.width - tooltipRect.width - padding;
+      left = Math.max(minLeft, Math.min(maxLeft, left));
+
+      tooltip.style.left = `${left}px`;
+      tooltip.style.top = `${markerTopY}px`;
+    });
+
+    marker.addEventListener("mouseleave", () => {
+      tooltip.style.opacity = 0;
+    });
+
+
     overlay.appendChild(marker);
   });
 }
+
 
 // ----- Initial UI setup -----
 function initFiltersDefaults() {
