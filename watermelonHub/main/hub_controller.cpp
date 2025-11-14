@@ -32,7 +32,7 @@ bool HubController::initialize() {
     }
     
     // Start web server
-    if (webServer && !webServer->start(8080)) {
+    if (webServer && !webServer->start(80)) {
         ESP_LOGE(TAG, "Failed to start web server");
         return false;
     }

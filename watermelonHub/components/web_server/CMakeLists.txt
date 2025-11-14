@@ -1,5 +1,5 @@
 idf_component_register(
-	SRCS "web_stub.cpp"
+	SRCS "web_server.cpp"
 	INCLUDE_DIRS "."
 	REQUIRES main esp_http_server
 )

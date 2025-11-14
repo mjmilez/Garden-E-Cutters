@@ -3,8 +3,42 @@
 #include "esp_log.h"
 #include "nvs_flash.h"
 #include "esp_spiffs.h"
+#include "esp_wifi.h"
+#include "esp_mac.h"
+#include "esp_event.h"
+#include <string.h>
 
 static const char* TAG = "MAIN";
+
+esp_err_t init_wifi_ap() {
+    ESP_ERROR_CHECK(esp_netif_init());
+    ESP_ERROR_CHECK(esp_event_loop_create_default());
+    esp_netif_create_default_wifi_ap();
+
+    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
+    ESP_ERROR_CHECK(esp_wifi_init(&cfg));
+
+    // Zero initialize the entire struct
+    wifi_config_t wifi_config;
+    memset(&wifi_config, 0, sizeof(wifi_config_t));
+    
+    // Now set only the fields we need
+    strcpy((char*)wifi_config.ap.ssid, "WatermelonHub");
+    strcpy((char*)wifi_config.ap.password, "harvest123");
+    wifi_config.ap.ssid_len = strlen("WatermelonHub");
+    wifi_config.ap.channel = 1;
+    wifi_config.ap.max_connection = 4;
+    wifi_config.ap.authmode = WIFI_AUTH_WPA_WPA2_PSK;
+
+    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));
+    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &wifi_config));
+    ESP_ERROR_CHECK(esp_wifi_start());
+
+    ESP_LOGI(TAG, "WiFi AP started. Connect to 'WatermelonHub'");
+    ESP_LOGI(TAG, "Browse to: http://192.168.4.1");
+    
+    return ESP_OK;
+}
 
 // Component factory functions (defined in each component)
 extern IBLEHandler* createBLEHandler();
@@ -39,6 +73,15 @@ extern "C" void app_main(void) {
     };
     ESP_ERROR_CHECK(esp_vfs_spiffs_register(&conf));
     
+    ret = init_wifi_ap();
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to initialize WiFi AP: %s", esp_err_to_name(ret));
+        // You could still continue without WiFi, or restart
+        // esp_restart(); // Optional: restart if WiFi is critical
+    } else {
+        ESP_LOGI(TAG, "WiFi AP initialized successfully");
+    }
+
     // Create hub controller
     hub = new HubController();
     
