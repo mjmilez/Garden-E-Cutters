@@ -1,0 +1,359 @@
+/* ===== Global Reset & Base Styles ===== */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  background-color: #f3f4f6;  /* light gray */
+  color: #111827;
+  line-height: 1.4;
+}
+
+/* Utility */
+.hidden {
+  display: none !important;
+}
+
+/* ===== Layout ===== */
+
+body {
+  display: flex;
+  flex-direction: column;
+}
+
+header#top-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.75rem 1.5rem;
+  background: #065f46;          /* deep green */
+  color: #f9fafb;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.16);
+  position: sticky;
+  top: 0;
+  z-index: 100;
+}
+
+header#top-bar h1 {
+  font-size: 1.1rem;
+  letter-spacing: 0.12em;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+/* Status bar on the right side of header */
+#status-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.9rem;
+  background: rgba(15, 118, 110, 0.3);
+  padding: 0.35rem 0.75rem;
+  border-radius: 999px;
+}
+
+/* Connection indicator dot */
+#connection-status-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background-color: #ef4444;  /* default: red / disconnected */
+  box-shadow: 0 0 0 2px rgba(0,0,0,0.15);
+}
+
+/* States for the dot */
+#connection-status-dot.connected {
+  background-color: #22c55e;  /* green */
+}
+
+#connection-status-dot.disconnected {
+  background-color: #ef4444;  /* red */
+}
+
+#connection-status-text {
+  font-weight: 500;
+}
+
+#total-cuts-label {
+  font-weight: 500;
+  margin-left: 0.5rem;
+}
+
+#total-cuts-value {
+  font-weight: 700;
+}
+
+/* ===== Tabs Bar ===== */
+
+nav#tabs {
+  display: flex;
+  align-items: stretch;
+  background-color: #e5e7eb;
+  padding: 0;                 /* no inner padding so tabs can use full width */
+}
+
+/* each tab takes up 50% of the bar */
+.tab-button {
+  flex: 1 1 0;
+  border: none;
+  background: transparent;
+  margin: 0;                  /* IMPORTANT: remove any margin-left/right */
+  padding: 0.75rem 0;
+  font-size: 0.95rem;
+  font-weight: 500;
+  color: #4b5563;
+  border-radius: 0.5rem 0.5rem 0 0;
+  cursor: pointer;
+  text-align: center;         /* center the label in each tab */
+  transition: background-color 0.15s ease,
+              color 0.15s ease,
+              box-shadow 0.15s ease;
+}
+
+.tab-button:hover {
+  background-color: #d1d5db;
+  color: #111827;
+}
+
+.tab-button.active {
+  background-color: #f9fafb;
+  color: #065f46;
+  box-shadow: 0 -1px 0 0 #f9fafb, 0 -2px 0 0 #065f46;
+}
+
+
+/* ===== Main Content ===== */
+
+main {
+  flex: 1;
+  padding: 1rem 1.5rem 1.5rem;
+}
+
+/* Tab content containers */
+.tab-content {
+  display: none;
+  background-color: #f9fafb;
+  border-radius: 0.75rem;
+  padding: 1rem 1.25rem;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+}
+
+.tab-content.active {
+  display: block;
+}
+
+/* ===== Logs View ===== */
+
+#log-tab {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+/* Filters row */
+#log-filters {
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.75rem 0.75rem;
+  border-radius: 0.75rem;
+  background-color: #e5f2eb;
+  border: 1px solid #bbf7d0;
+}
+
+#log-filters label {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.9rem;
+}
+
+#log-filters input[type="date"],
+#log-filters select {
+  padding: 0.25rem 0.4rem;
+  border-radius: 0.4rem;
+  border: 1px solid #d1d5db;
+  font-size: 0.85rem;
+  background-color: #f9fafb;
+}
+
+#log-filters input[type="range"] {
+  accent-color: #065f46;
+}
+
+/* Filter button */
+#filter-button {
+  padding: 0.4rem 0.9rem;
+  border-radius: 0.5rem;
+  border: none;
+  background-color: #047857;
+  color: #f9fafb;
+  font-size: 0.85rem;
+  font-weight: 500;
+  cursor: pointer;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.15);
+  transition: background-color 0.15s ease, transform 0.1s ease, box-shadow 0.15s ease;
+}
+
+#filter-button:hover {
+  background-color: #059669;
+  transform: translateY(-1px);
+  box-shadow: 0 3px 6px rgba(0,0,0,0.18);
+}
+
+#filter-button:active {
+  transform: translateY(0);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+}
+
+/* Force value label */
+#force-threshold-value {
+  font-weight: 500;
+  color: #065f46;
+}
+
+/* Logs table */
+#cut-log-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+  background-color: #ffffff;
+  border-radius: 0.75rem;
+  overflow: hidden;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.12);
+}
+
+#cut-log-table thead {
+  background-color: #e5e7eb;
+}
+
+#cut-log-table th,
+#cut-log-table td {
+  padding: 0.6rem 0.75rem;
+  text-align: left;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+#cut-log-table th {
+  font-weight: 600;
+  color: #374151;
+  text-transform: uppercase;
+  font-size: 0.75rem;
+}
+
+#cut-log-table tbody tr:nth-child(odd) {
+  background-color: #f9fafb;
+}
+
+#cut-log-table tbody tr:hover {
+  background-color: #e0f2fe;
+}
+
+/* ===== Map View ===== */
+
+#map-tab {
+  min-height: 400px;
+}
+
+#map-container {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 2047 / 1032;   /* <- NEW: lock container to same ratio as image */
+  border-radius: 0.75rem;
+  background-color: #111827;
+  background-image: url("gnv_pic.png");
+  background-size: 100% 100%;  /* now safe: no distortion because ratios match */
+  background-position: center;
+  overflow: hidden;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+}
+
+
+/* overlay where we draw markers */
+#map-overlay {
+  position: absolute;
+  inset: 0;
+}
+
+/* individual cut marker */
+.map-marker {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background-color: #22c55e;          /* green dot */
+  border: 2px solid #f9fafb;
+  transform: translate(-50%, -50%);   /* center on coordinate */
+  box-shadow: 0 0 4px rgba(0,0,0,0.7);
+  pointer-events: none;               /* markers don’t block clicks */
+}
+
+/* ===== Responsive Tweaks ===== */
+
+@media (max-width: 900px) {
+  header#top-bar {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.5rem;
+  }
+
+  #status-bar {
+    align-self: stretch;
+    justify-content: flex-start;
+  }
+
+  nav#tabs {
+    display: flex;
+    align-items: stretch;
+    background-color: #e5e7eb;
+    padding: 0.25rem 1.5rem 0;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+    gap: 0.25rem;
+  }
+
+  main {
+    padding: 0.75rem 1rem 1rem;
+  }
+
+  #log-filters {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
+
+@media (max-width: 600px) {
+  #cut-log-table th,
+  #cut-log-table td {
+    padding: 0.45rem 0.5rem;
+  }
+
+  header#top-bar h1 {
+    font-size: 0.95rem;
+  }
+
+  .tab-button {
+    flex: 1 1 0;              /* each tab takes up half the width */
+    border: none;
+    background: transparent;
+    padding: 0.6rem 1.25rem;
+    font-size: 0.95rem;
+    font-weight: 500;
+    color: #4b5563;
+    border-radius: 0.5rem 0.5rem 0 0;
+    cursor: pointer;
+    text-align: center;        /* center label in each tab */
+    transition: background-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+  }
+}
