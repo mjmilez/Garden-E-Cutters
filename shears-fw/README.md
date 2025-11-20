@@ -1,71 +1,112 @@
 # Shears Firmware
 
-The shears firmware runs on an ESP32 using ESP-IDF and provides the BLE peripheral (server) side of the Garden E-Cutters wireless link. It advertises a connectable BLE service, accepts incoming connections from the base station, and exposes a simple connection status indicator through a GPIO-driven LED.
+The shears firmware runs on an ESP32 and implements the BLE peripheral, GPS logger, and status LED functionality for the Garden E-Cutters project. It advertises as a BLE device, accepts a connection from the base station, logs GPS points from a UART-connected GPS module, and exposes connection / logging state through a status LED.
 
 ## Features
 
-### BLE Peripheral
-- Uses ESP-IDF’s NimBLE stack.
-- Advertises as **`WM-SHEARS`**.
-- Broadcasts a custom 16-bit service UUID: **`0xFFF0`**.
-- Accepts connections from the base ESP32.
+### 1. BLE Peripheral (NimBLE)
+- Advertises as `WM-SHEARS`.
+- Broadcasts a custom 16-bit service UUID: `0xFFF0`.
+- Accepts connections from the base station (central).
 - Automatically restarts advertising after disconnects or failed connection attempts.
+- Reports connection state to the application layer via callback.
 
-### Status LED (GPIO33)
-- LED connected to **GPIO 33**.
-- **Fast blink** while advertising or waiting for a connection.
-- **Solid on** when a BLE connection is active.
-- Returns to blinking if the connection drops.
+### 2. Status LED (GPIO 33)
+Implemented in `shears_led.c`.
+
+| State | Behavior |
+|-------|----------|
+| Advertising / Waiting for Connection | Fast blink |
+| Connected to Base | Solid ON |
+| Disconnected | Blink again |
+
+The LED subsystem runs its own FreeRTOS task and does not block BLE or GPS logic.
+
+### 3. GPS Logger (UART2 + SPIFFS + Button)
+Fully modularized in `gps_logger.c`.
+
+Functionality:
+- Reads NMEA sentences from GPS over UART2 (GPIO16/17 at 9600 baud).
+- Builds full NMEA lines in a background task.
+- Maintains the most recent NMEA sentence.
+- On command, parses `$GPGGA` and stores CSV data to SPIFFS:
+  `/spiffs/gps_points.csv`
+- Hardware “Save Point” button on GPIO23 (falling-edge interrupt).
+- Software save also available via:
+  `gpsLoggerRequestSave();`
+
+CSV fields:
+```
+utc_time, latitude, longitude, fix_quality, num_satellites,
+hdop, altitude, geoid_height
+```
 
 ## Project Structure
-
 ```
 shears-fw/
 ├── main/
 │   ├── main.c
+│   ├── shears_led.c/.h
+│   ├── shears_ble.c/.h
+│   ├── gps_logger.c/.h
 │   └── CMakeLists.txt
-└── CMakeLists.txt
+└── partitions.csv
+```
+
+## Partition Table
+```
+nvs,        data, nvs,     0x9000,   0x5000
+phy_init,   data, phy,     0xE000,   0x1000
+factory,    app,  factory, 0x10000,  0x140000
+storage,    data, spiffs,            0x64000
 ```
 
 ## Build & Flash
 
-Make sure ESP-IDF is installed and activated.
-
-### Set target (if not already done):
-```bash
+Set target:
+```
 idf.py set-target esp32
 ```
 
-### Build:
-```bash
+Build:
+```
 idf.py build
 ```
 
-### Flash (example port):
-```bash
+Flash:
+```
 idf.py -p COM5 flash
 ```
 
-### Monitor:
-```bash
+Monitor:
+```
 idf.py -p COM5 monitor
 ```
 
 ## Hardware Notes
 
-### LED
-- GPIO: **33**
-- LED type: **active-high**
-- Series resistor recommended (≈220–330 Ω).
-- LED behavior is controlled by the LED task in `main.c`.
+### Status LED
+- GPIO: 33
+- Active-high
+- 220–330 Ω resistor required
 
-### BLE
-- Works with ESP32 modules supporting the NimBLE stack.
-- Must be powered for the base unit to connect.
+### GPS UART
+- RX → GPIO 16
+- TX → GPIO 17
+- 9600 baud
+
+### Button
+- GPIO 23
+- Internal pull-up
+- Falling-edge interrupt
+
+### SPIFFS
+- Mounted at `/spiffs`
+- Stores `/spiffs/gps_points.csv`
 
 ## Next Steps
+- Add GATT services for telemetry
+- Add remote GPS snapshot commands
+- Implement low-power sleep
+- Add packet buffering and CRC
 
-- Add a custom GATT service for telemetry packets (force, position, battery, etc.).
-- Implement packet buffering for intermittent connections.
-- Add power management (sleep/wake).
-- Define packet structure and CRC fields.
