@@ -4,6 +4,7 @@ idf_component_register(
         "shears_led.c"
         "shears_ble.c"
         "gps_logger.c"
+        "log_transfer_server.c"
     INCLUDE_DIRS
         "."
 )
