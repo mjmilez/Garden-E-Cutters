@@ -1,4 +1,8 @@
 idf_component_register(
-    SRCS "main.c"
-    INCLUDE_DIRS "."
+    SRCS
+        "main.c"
+        "shears_led.c"
+        "shears_ble.c"
+    INCLUDE_DIRS
+        "."
 )
