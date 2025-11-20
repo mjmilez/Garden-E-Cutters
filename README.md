@@ -1,64 +1,117 @@
-# Garden E‑Cutters Firmware (BLE-v1)
+# Garden E‑Cutters Firmware (BLE‑v1)
 
-This branch contains the first working BLE link between the **shears** and the **base station**.  
-Both devices run ESP-IDF with the NimBLE stack and implement the foundational communication layer for the E‑Cutters system.  
-The goal of BLE‑v1 is to establish a stable connection, define the structure for future data exchange, and prepare for telemetry transport.
+This branch contains the first fully modular BLE communication link between the **shears** and the **base station**.  
+Both sides run ESP‑IDF using the NimBLE stack and now include clean subsystem architecture for BLE, LED status indication, and (on the shears) GPS logging with SPIFFS.
 
----
-
-## High‑Level Overview
-
-### Shears Firmware (Peripheral)
-The shears firmware runs as a **BLE peripheral** that:
-- Advertises as `WM-SHEARS`
-- Publishes a primary BLE service (`0xFFF0`)
-- Accepts incoming connections from the base station
-- Restarts advertising automatically if the connection is lost
-
-A status LED is connected to **GPIO33**:
-- Fast blink while advertising / waiting for a connection  
-- Solid on when connected  
-- Returns to blinking after disconnect  
-
-This LED gives immediate visual feedback on the BLE link state.
-
-The shears currently do **not** send telemetry yet, but the structure is ready for the next step:
-- A fixed-size telemetry struct
-- A characteristic for data publishing
-- A periodic task to generate and push packets through notify once implemented
+BLE‑v1 establishes a stable connection flow, separates responsibilities into modules, and lays the groundwork for structured telemetry exchange in BLE‑v2.
 
 ---
 
-### Base Firmware (Central)
-The base station firmware runs as a **BLE central** that:
-- Scans continuously for devices named `WM-SHEARS`
-- Filters advertisement packets by device name
-- Initiates a BLE connection when the shears are discovered
-- Restarts scanning automatically if the link fails or drops
+# High‑Level Overview
 
-The base also uses **GPIO33** for a status LED:
-- Fast blink while scanning / connecting  
-- Solid on when connected to the shears  
+## Shears Firmware (Peripheral Role)
 
-This matches the shears’ LED behavior and helps confirm link status.
+The shears run as a **BLE Peripheral** and now include **three independent subsystems**:
 
-The base currently performs:
-- Active scanning
-- Name-based filtering
-- Manual connect attempts
-- Logging of discovered and connected devices
+### **1. BLE Peripheral (shears_ble.c/.h)**
+- Advertises as **`WM-SHEARS`**
+- Broadcasts custom service UUID **`0xFFF0`**
+- Accepts incoming connections from the base
+- Automatically restarts advertising on:
+  - disconnect
+  - connection failure
+- Reports connection state to the application layer via callback
 
-Telemetry discovery and notification handling will be added in the next milestone.
+### **2. Status LED (shears_led.c/.h)**
+- GPIO: **33**
+- Fast blink → advertising / searching for base  
+- Solid ON   → connected  
+- Blink again → disconnected  
+- Dedicated FreeRTOS task ensures non‑blocking behavior
+
+### **3. GPS Logger (gps_logger.c/.h)**
+The shears now include a fully integrated GPS logging subsystem:
+
+- Reads NMEA sentences via **UART2** (GPIO16/17 @ 9600 baud)
+- Buffers full NMEA lines in a background task
+- Extracts and parses **`$GPGGA`** sentences
+- Stores GPS fixes to **SPIFFS** at:
+  `/spiffs/gps_points.csv`
+- Ensures CSV file + headers exist on boot
+- Physical “Save Point” button on **GPIO 23** triggers a save
+- Software save is also available through:
+  ```c
+  gpsLoggerRequestSave();
+  ```
+
+This module is fully self‑contained and ready to integrate with BLE commands in BLE‑v2.
 
 ---
 
-## Next Steps for BLE-v1 → BLE-v2
+## Base Firmware (Central Role)
 
-The next development step is adding **real, structured communication**.  
-The plan is already defined:
+The base firmware runs as a **BLE Central**, handling scanning and link management:
 
-### 1. Define a telemetry record
-Example structure:
+### **1. BLE Central (base_ble.c/.h)**
+- Scans continuously for advertisements named **`WM-SHEARS`**
+- Filters by device name for fast pairing
+- Attempts connection when the shears are detected
+- Automatically resumes scanning on:
+  - disconnect
+  - connection failure
+  - scan completion event
+
+### **2. Status LED (base_led.c/.h)**
+- GPIO: **33**
+- Fast blink → scanning / connecting  
+- Solid ON   → connected  
+- Returns to blinking on disconnect  
+- Runs in its own FreeRTOS task
+
+The base is now cleanly structured and ready to add:
+- GATT discovery  
+- Notification subscription  
+- Telemetry decoding  
+
+in BLE‑v2.
+
+---
+
+# Updated Architecture (BLE‑v1 Modular Layout)
+
+```
+BLE-v1/
+├── shears-fw/
+│   ├── main/
+│   │   ├── main.c
+│   │   ├── shears_ble.c/.h
+│   │   ├── shears_led.c/.h
+│   │   ├── gps_logger.c/.h
+│   │   └── CMakeLists.txt
+│   └── README.md
+│
+├── base-fw/
+│   ├── main/
+│   │   ├── main.c
+│   │   ├── base_ble.c/.h
+│   │   ├── base_led.c/.h
+│   │   └── CMakeLists.txt
+│   └── README.md
+│
+└── README.md   <-- (this file)
+```
+
+Each subsystem is fully separated, testable, and easy to expand.
+
+---
+
+# BLE‑v1 → BLE‑v2 Roadmap
+
+BLE‑v1 establishes a stable and modular BLE foundation. BLE‑v2 will introduce *actual data exchange*.
+
+## **1. Telemetry Record Definition**
+
+Planned structure:
 
 ```c
 typedef struct {
@@ -72,76 +125,85 @@ typedef struct {
 } __attribute__((packed)) shears_telemetry_t;
 ```
 
-For BLE‑v1 → BLE‑v2 transition, a simplified version will be used for bring-up.
-
-### 2. Add a GATT characteristic on the shears
-- Service UUID: `0xFFF0` (already advertising)
-- Telemetry Characteristic UUID: `0xFFF1`
-- Properties: `READ | NOTIFY`
-
-### 3. Shears: periodic telemetry task
-- Update struct fields (e.g., increment `seq`)
-- Send notify if connected + notifications enabled
-
-### 4. Base: service + characteristic discovery
-- Discover `0xFFF0` service and `0xFFF1` characteristic
-- Enable notifications through CCCD
-- Log incoming packets
-
-This forms the **shears → base** telemetry channel.
-
-After this is stable, a command/control characteristic (`0xFFF2`) can be added for base → shears messages.
+This will be transported over BLE in BLE‑v2.
 
 ---
 
-## Current Project Structure
+## **2. Shears: Add Telemetry GATT Characteristic**
+Service: `0xFFF0`  
+Characteristic: `0xFFF1`
 
-```
-BLE-v1/
-├── shears-fw/
-│   ├── main/
-│   │   └── main.c
-│   └── README.md
-├── base-fw/
-│   ├── main/
-│   │   └── main.c
-│   └── README.md
-└── README.md   <-- (this file)
-```
+Properties:
+- READ
+- NOTIFY
+
+The shears will:
+- update telemetry fields periodically
+- send notifications when connected
 
 ---
 
-## Build & Flash (Both Firmware Targets)
+## **3. Base: Discovery + Notification Pipeline**
+The base will:
+- Discover the shears’ GATT service
+- Find characteristic `0xFFF1`
+- Enable notifications via CCCD
+- Log incoming telemetry packets
 
-Activate ESP-IDF first.
+This establishes the one‑way (shears → base) telemetry stream.
 
-### Build
+---
+
+## **4. Optional: Add Command/Control Characteristic (`0xFFF2`)**
+Allows base → shears messaging, e.g.:
+
+- Trigger GPS save  
+- Request configuration  
+- Set sampling rates  
+
+---
+
+# Build & Flash Instructions (Both Targets)
+
+Activate ESP-IDF:
+
+```bash
+. $IDF_PATH/export.sh
+```
+
+Build:
+
 ```bash
 idf.py build
 ```
 
-### Flash (example)
+Flash (example):
+
 ```bash
 idf.py -p COM5 flash
 ```
 
-### Monitor
+Monitor:
+
 ```bash
 idf.py -p COM5 monitor
 ```
 
 ---
 
-## Summary
+# Summary
 
-BLE-v1 establishes:
-- Reliable BLE discovery
-- Central ↔ Peripheral connection flow
-- Automatic reconnection logic
-- Status LEDs on both devices
-- Advertising + scanning foundation
-- Initial layout for future GATT services
-- Clear roadmap for telemetry communication
+BLE‑v1 now includes:
 
-This branch now forms the baseline for the full BLE data link used in the Garden E‑Cutters system.
+✓ Fully modular subsystems  
+✓ BLE connection logic (central ↔ peripheral)  
+✓ Automatic scanning/advertising recovery  
+✓ Status LEDs on both devices  
+✓ SPIFFS filesystem integration  
+✓ GPS UART + CSV logging on shears  
+✓ Clean project structure ready for telemetry  
+
+BLE‑v1 delivers the stable communication foundation needed to build the full wireless data link for the Garden E‑Cutters system.
+
+BLE‑v2 will layer telemetry, command/control, and reliability mechanisms on top of this solid base.
 
