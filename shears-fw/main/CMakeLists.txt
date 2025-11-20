@@ -3,6 +3,7 @@ idf_component_register(
         "main.c"
         "shears_led.c"
         "shears_ble.c"
+        "gps_logger.c"
     INCLUDE_DIRS
         "."
 )
