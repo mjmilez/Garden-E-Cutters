@@ -1,44 +1,38 @@
-/**
- * @file gps_logger.h
- * @brief GPS NMEA logging module for the shears firmware.
- *
- * This module:
- *  - Mounts SPIFFS and ensures gps_points.csv exists with a header
- *  - Configures UART2 to read NMEA sentences from a GPS module
- *  - Spawns a task to assemble full NMEA lines and track the latest one
- *  - Installs a button ISR on GPIO 23 to request a "save point"
- *  - Spawns a logger task that, when asked, parses the latest $GPGGA
- *    and appends it as a CSV row to /spiffs/gps_points.csv
- *
- * The app can also trigger a save in software (e.g. via BLE) with
- * gpsLoggerRequestSave(), not just the physical button.
- */
-
 #pragma once
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-/**
- * @brief Initialize SPIFFS, UART2, tasks, and the save button ISR.
+/*
+ * GPS logging entry point for the shears.
  *
- * Call this once from app_main() after FreeRTOS is running.
+ * Once initialized, this module:
+ *   - mounts SPIFFS and creates /spiffs/gps_points.csv with a header
+ *   - configures UART2 to read NMEA sentences from the GPS
+ *   - keeps track of the latest full NMEA line
+ *   - exposes a "save" path driven by a button interrupt or API call
+ *   - on save, parses $GPGGA and appends one CSV row
+ */
+
+/*
+ * Bring up SPIFFS, UART2, the button ISR, and background tasks.
+ *
+ * Call once from app_main() during startup.
  */
 void gpsLoggerInit(void);
 
-/**
- * @brief Request that the current GPS fix be saved to CSV.
+/*
+ * Request that the current GPS fix be written as a CSV row.
  *
- * This sets the same internal flag that the physical button ISR sets.
- * A background task will handle parsing and writing to the file.
+ * This sets the same internal flag that the physical button interrupt uses.
+ * The logger task will consume the flag and handle parsing and file I/O.
  */
 void gpsLoggerRequestSave(void);
 
-/**
- * @brief Print the contents of /spiffs/gps_points.csv to the log.
- *
- * Useful for debugging or serial inspection.
+/*
+ * Print the contents of /spiffs/gps_points.csv to the log.
+ * Mainly useful for debugging over the serial console.
  */
 void gpsLoggerPrintCsv(void);
 

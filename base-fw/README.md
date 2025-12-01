@@ -1,122 +1,129 @@
 # Base Firmware
 
-The base firmware runs on an ESP32 using ESP-IDF and acts as the **BLE central (client)** for the Garden E-Cutters system. It scans for the shears device, connects when it is found, and drives a status LED to indicate link state.
+The base firmware runs on an ESP32 (ESP-IDF) and acts as the BLE central for the Garden E-Cutters system. It scans for the shears device, connects when it is found, drives a status LED, and requests log data using the custom log-transfer service.
 
----
+## What This Firmware Does
 
-## Features
+### 1. BLE Central for WM-SHEARS
+Files: base_ble.c, base_ble.h
 
-### 1. BLE Central (NimBLE)
+The base uses NimBLE in central mode:
 
-Implemented in `base_ble.c`.
+- Scans for devices advertising "WM-SHEARS"
+- Filters advertisements by name
+- Connects automatically when the shears are discovered
+- Restarts scanning on disconnect, failed connection attempts, or scan completion
+- Reports link state through a callback
+- Performs full GATT discovery to locate the log-transfer service and characteristics
 
-- Uses ESP-IDF’s NimBLE stack as a BLE **central**.
-- Scans for devices advertising the name **`WM-SHEARS`**.
-- Filters advertisements by device name to avoid unnecessary connections.
-- Initiates a BLE connection when the shears device is discovered.
-- Automatically restarts scanning after:
-  - disconnects
-  - failed connection attempts
-  - completed scan windows
-- Reports connection state to the application layer via a callback.
+### 2. Log Transfer Client
+Files: log_transfer_client.c, log_transfer_client.h
 
----
+The base implements the client side of a simple file transfer protocol:
 
-### 2. Status LED (GPIO 33)
+1. Sends START_TRANSFER with the requested filename
+2. Receives STATUS_OK with file size
+3. Streams incoming chunks into SPIFFS or a RAM buffer
+4. Handles STATUS_TRANSFER_DONE and finalizes storage
+5. Dumps the first several lines for debugging
 
-Implemented in `base_led.c`.
+The client is entirely self-contained. BLE only forwards notifications into it.
+
+### 3. Status LED (GPIO 33)
+File: base_led.c
 
 LED behavior:
+- Blink while scanning or attempting to reconnect
+- Solid on when connected
 
-| State                                      | Behavior   |
-|-------------------------------------------|-----------|
-| Scanning / Attempting to Connect          | Fast blink |
-| Connected to Shears                       | Solid ON   |
-| Disconnected / Link Lost                  | Blink again |
+Runs in its own FreeRTOS task.
 
-The LED logic runs in its own FreeRTOS task and is controlled through a small API (`baseLedSetBlinking`, `baseLedSetSolidOn`, etc.) so it stays decoupled from BLE internals.
+### 4. SPIFFS Initialization
+File: main.c
 
----
+Mounts the "storage" partition at /spiffs so CSV logs can be written locally.
 
 ## Project Structure
 
-The base firmware is organized into small, focused modules:
-
-```text
+```
 base-fw/
 ├── main/
-│   ├── main.c          # High-level wiring: LED + BLE init and callbacks
-│   ├── base_led.c/.h   # Status LED subsystem (GPIO33 + blink task)
-│   ├── base_ble.c/.h   # BLE central logic (scan + connect to WM-SHEARS)
+│   ├── main.c
+│   ├── base_led.c
+│   ├── base_led.h
+│   ├── base_ble.c
+│   ├── base_ble.h
+│   ├── log_transfer_client.c
+│   ├── log_transfer_client.h
+│   ├── log_transfer_protocol.h
+│   ├── log_paths.h
 │   └── CMakeLists.txt
-└── CMakeLists.txt      # Top-level ESP-IDF project configuration
+└── CMakeLists.txt
 ```
 
-`main.c` is intentionally minimal and only wires modules together:
-- Initializes the LED subsystem
-- Initializes BLE central logic
-- Updates LED state when the BLE connection state changes
+main.c wires modules together:
 
----
+- Initialize SPIFFS
+- Initialize and start LED system
+- Initialize BLE central
+- Request logs when connected
 
-## Build & Flash
+## Build and Flash
 
-Make sure ESP-IDF is installed and the environment is activated.
-
-### Set target (if not already done):
-
-```bash
+```
 idf.py set-target esp32
-```
-
-### Build:
-
-```bash
 idf.py build
+idf.py -p <port> flash
+idf.py -p <port> monitor
 ```
 
-### Flash (example port):
-
-```bash
-idf.py -p COM6 flash
-```
-
-### Monitor:
-
-```bash
-idf.py -p COM6 monitor
-```
-
-Use the appropriate serial port for your system instead of `COM6`.
-
----
+Replace <port> with your serial device.
 
 ## Hardware Notes
 
-### Status LED
-
-- GPIO: **33**
-- LED type: **active-high**
-- Recommended series resistor: **220–330 Ω**
-- Behavior:
-  - Blinks while scanning / attempting connection
-  - Solid ON when connected
-- All timing and behavior are managed by `base_led.c`.
+### LED
+- GPIO: 33
+- Active-high
+- Series resistor: 220 to 330 ohms
 
 ### BLE Link
-
-- Designed to pair with the shears firmware advertising as **`WM-SHEARS`**.
-- The base must remain powered to maintain the BLE connection.
-- Uses NimBLE in central mode; no GATT services are exposed yet by the base.
-
----
+- Pairs with the shears advertising as "WM-SHEARS"
+- Base works only as central
+- Uses NimBLE for low resource usage
 
 ## Next Steps
 
-Possible future extensions:
+### 1. Per-entry CRC Validation
+Future transfers will treat each log entry as a discrete record with:
+- entry index
+- payload
+- CRC
 
-- Perform GATT service / characteristic discovery on the shears.
-- Subscribe to telemetry characteristics (force, position, battery, GPS triggers, etc.).
-- Implement packet handling, parsing, and validation (CRC / sequence counters).
-- Add connection timeout/backoff logic and more sophisticated reconnection policies.
-- Integrate with higher-level application logic once telemetry and command formats are defined.
+The base will verify each entry before committing it.
+
+### 2. Queue-Based Deletion Pipeline
+Once the base receives and validates an entry:
+- Write to SPIFFS
+- Respond with acknowledgement
+- Shears deletes the acknowledged entry
+- Shears sends the next entry
+
+This prevents re-sending entire CSV files and provides ordered, reliable delivery.
+
+### 3. Shears-Side Bookkeeping
+The shears will maintain:
+- A queue of unsent log entries
+- A flag for waiting on an acknowledgement
+- Logic for deleting entries on acknowledgement
+- Ability to resume after disconnects
+
+### 4. Optional Future Telemetry
+The base may later subscribe to telemetry characteristics such as:
+- force readings
+- blade position
+- cut events
+- GPS triggers
+- battery status
+
+### 5. Improved Reconnection Logic
+Add backoff or timing control to avoid constant reconnect attempts when the shears are unavailable.

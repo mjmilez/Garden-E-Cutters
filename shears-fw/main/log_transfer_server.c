@@ -1,3 +1,19 @@
+/*
+ * Log transfer GATT server on the shears side.
+ *
+ * This exposes a simple BLE service that lets the base request a file by
+ * basename and receive it in indexed chunks:
+ *
+ *   - control characteristic:
+ *       base writes START_TRANSFER / ABORT
+ *       shears sends STATUS_* events back
+ *
+ *   - data characteristic:
+ *       shears pushes file chunks as notifications, each with a chunk index
+ *
+ * The actual file lives on /spiffs and is streamed out by a background task.
+ */
+
 #include <stdio.h>
 #include <string.h>
 
@@ -12,13 +28,14 @@
 
 static const char *TAG = "log_xfer_srv";
 
+/* UUIDs for the custom log service and its characteristics */
 #define LOG_SVC_UUID       0xFFF0
 #define LOG_CTRL_CHR_UUID  0xFFF1
 #define LOG_DATA_CHR_UUID  0xFFF2
 
 typedef struct {
 	bool        active;
-	char        filename[64];
+	char        filename[64];    /* full path "/spiffs/<basename>" */
 	FILE       *fp;
 	uint32_t    file_size;
 	uint32_t    bytes_sent;
@@ -34,21 +51,24 @@ static log_transfer_t g_log_xfer;
 static uint16_t g_ctrl_char_handle = 0;
 static uint16_t g_data_char_handle = 0;
 
-static int log_ctrl_access_cb(uint16_t conn_handle,
-			      uint16_t attr_handle,
-			      struct ble_gatt_access_ctxt *ctxt,
-			      void *arg);
-static int log_data_access_cb(uint16_t conn_handle,
-			      uint16_t attr_handle,
-			      struct ble_gatt_access_ctxt *ctxt,
-			      void *arg);
-
+static int  log_ctrl_access_cb(uint16_t conn_handle,
+			       uint16_t attr_handle,
+			       struct ble_gatt_access_ctxt *ctxt,
+			       void *arg);
+static int  log_data_access_cb(uint16_t conn_handle,
+			       uint16_t attr_handle,
+			       struct ble_gatt_access_ctxt *ctxt,
+			       void *arg);
 static void log_transfer_task(void *arg);
 static void handle_start_transfer(uint16_t conn_handle,
 				  const uint8_t *filename_buf,
 				  uint16_t filename_len);
 static void handle_abort_transfer(void);
 static void send_status(ctrl_status_code_t status, uint32_t file_size);
+
+/* -------------------------------------------------------------------------- */
+/* GATT service definition                                                    */
+/* -------------------------------------------------------------------------- */
 
 static struct ble_gatt_svc_def log_svc_def[] = {
 	{
@@ -73,8 +93,19 @@ static struct ble_gatt_svc_def log_svc_def[] = {
 	{ 0 }
 };
 
+/* -------------------------------------------------------------------------- */
+/* Status notifications (shears → base, control characteristic)               */
+/* -------------------------------------------------------------------------- */
+
 static void send_status(ctrl_status_code_t status, uint32_t file_size)
 {
+	ESP_LOGI(TAG, "send_status: code=%u size=%u (conn=%u, ctrl=0x%04x)",
+		 status,
+		 file_size,
+		 g_log_xfer.conn_handle,
+		 g_log_xfer.ctrl_val_handle ? g_log_xfer.ctrl_val_handle
+					    : g_ctrl_char_handle);
+
 	uint8_t payload[1 + 1 + 4];
 	uint16_t len = 0;
 
@@ -90,12 +121,17 @@ static void send_status(ctrl_status_code_t status, uint32_t file_size)
 		g_log_xfer.ctrl_val_handle = g_ctrl_char_handle;
 	}
 
-	if (g_log_xfer.ctrl_val_handle == 0 || g_log_xfer.conn_handle == 0) {
+	/* Only bail if we truly do not know the control handle.
+	 * Note: conn_handle == 0 is valid in NimBLE.
+	 */
+	if (g_log_xfer.ctrl_val_handle == 0) {
+		ESP_LOGW(TAG, "send_status aborted: missing ctrl handle");
 		return;
 	}
 
 	struct os_mbuf *om = ble_hs_mbuf_from_flat(payload, len);
 	if (!om) {
+		ESP_LOGW(TAG, "send_status: allocation failed");
 		return;
 	}
 
@@ -107,10 +143,17 @@ static void send_status(ctrl_status_code_t status, uint32_t file_size)
 	}
 }
 
+/* -------------------------------------------------------------------------- */
+/* Start/abort handlers                                                       */
+/* -------------------------------------------------------------------------- */
+
 static void handle_start_transfer(uint16_t conn_handle,
 				  const uint8_t *filename_buf,
 				  uint16_t filename_len)
 {
+	/* Always remember the latest connection so STATUS_* can reach the base. */
+	g_log_xfer.conn_handle = conn_handle;
+
 	if (g_log_xfer.ctrl_val_handle == 0) {
 		g_log_xfer.ctrl_val_handle = g_ctrl_char_handle;
 	}
@@ -123,13 +166,23 @@ static void handle_start_transfer(uint16_t conn_handle,
 		return;
 	}
 
-	if (filename_len == 0 || filename_len >= sizeof(g_log_xfer.filename)) {
+	if (filename_len == 0 || filename_len > 48) {
 		send_status(STATUS_ERR_FS, 0);
 		return;
 	}
 
-	memcpy(g_log_xfer.filename, filename_buf, filename_len);
-	g_log_xfer.filename[filename_len] = '\0';
+	char basename[48];
+	memcpy(basename, filename_buf, filename_len);
+	basename[filename_len] = '\0';
+
+	int n = snprintf(g_log_xfer.filename,
+			 sizeof(g_log_xfer.filename),
+			 "/spiffs/%s",
+			 basename);
+	if (n <= 0 || n >= (int)sizeof(g_log_xfer.filename)) {
+		send_status(STATUS_ERR_FS, 0);
+		return;
+	}
 
 	ESP_LOGI(TAG, "Start transfer for file '%s'", g_log_xfer.filename);
 
@@ -160,7 +213,6 @@ static void handle_start_transfer(uint16_t conn_handle,
 	g_log_xfer.file_size   = (uint32_t)size;
 	g_log_xfer.bytes_sent  = 0;
 	g_log_xfer.chunk_index = 0;
-	g_log_xfer.conn_handle = conn_handle;
 	g_log_xfer.chunk_size  = 160;
 
 	send_status(STATUS_OK, g_log_xfer.file_size);
@@ -180,6 +232,10 @@ static void handle_abort_transfer(void)
 	g_log_xfer.active = false;
 	send_status(STATUS_TRANSFER_ABORTED, g_log_xfer.file_size);
 }
+
+/* -------------------------------------------------------------------------- */
+/* GATT callbacks                                                             */
+/* -------------------------------------------------------------------------- */
 
 static int log_ctrl_access_cb(uint16_t conn_handle,
 			      uint16_t attr_handle,
@@ -233,8 +289,13 @@ static int log_data_access_cb(uint16_t conn_handle,
 	(void)ctxt;
 	(void)arg;
 
+	/* Data characteristic is notify-only from the shears side. */
 	return 0;
 }
+
+/* -------------------------------------------------------------------------- */
+/* Transfer task                                                              */
+/* -------------------------------------------------------------------------- */
 
 static void log_transfer_task(void *arg)
 {
@@ -244,23 +305,21 @@ static void log_transfer_task(void *arg)
 
 	while (1) {
 		if (g_log_xfer.active && g_log_xfer.fp) {
-			if (g_log_xfer.data_val_handle == 0) {
-				g_log_xfer.data_val_handle = g_data_char_handle;
-			}
+			size_t n = fread(&buf[2], 1,
+					 g_log_xfer.chunk_size,
+					 g_log_xfer.fp);
 
-			size_t to_read = g_log_xfer.chunk_size;
-			size_t n = fread(&buf[2], 1, to_read, g_log_xfer.fp);
-
-			if (n > 0 && g_log_xfer.data_val_handle != 0 &&
-			    g_log_xfer.conn_handle != 0) {
+			if (n > 0 && g_log_xfer.data_val_handle != 0) {
 				uint16_t idx = g_log_xfer.chunk_index;
 				memcpy(&buf[0], &idx, sizeof(idx));
 
-				struct os_mbuf *om = ble_hs_mbuf_from_flat(buf, 2 + n);
+				struct os_mbuf *om =
+					ble_hs_mbuf_from_flat(buf, 2 + n);
 				if (om) {
-					int rc = ble_gatts_notify_custom(g_log_xfer.conn_handle,
-									 g_log_xfer.data_val_handle,
-									 om);
+					int rc = ble_gatts_notify_custom(
+						g_log_xfer.conn_handle,
+						g_log_xfer.data_val_handle,
+						om);
 					if (rc != 0) {
 						ESP_LOGW(TAG, "DATA notify failed rc=%d", rc);
 					}
@@ -270,13 +329,15 @@ static void log_transfer_task(void *arg)
 				g_log_xfer.chunk_index++;
 			}
 
-			if (n < to_read) {
+			if (n < g_log_xfer.chunk_size) {
+				/* Short read means EOF or error: close file and signal done. */
 				if (g_log_xfer.fp) {
 					fclose(g_log_xfer.fp);
 					g_log_xfer.fp = NULL;
 				}
 				g_log_xfer.active = false;
-				send_status(STATUS_TRANSFER_DONE, g_log_xfer.file_size);
+				send_status(STATUS_TRANSFER_DONE,
+					    g_log_xfer.file_size);
 			}
 
 			vTaskDelay(pdMS_TO_TICKS(10));
@@ -285,6 +346,10 @@ static void log_transfer_task(void *arg)
 		}
 	}
 }
+
+/* -------------------------------------------------------------------------- */
+/* Init                                                                       */
+/* -------------------------------------------------------------------------- */
 
 void log_transfer_server_init(void)
 {
@@ -304,5 +369,10 @@ void log_transfer_server_init(void)
 
 	ESP_LOGI(TAG, "Log transfer service registered");
 
-	xTaskCreate(log_transfer_task, "log_xfer_task", 4096, NULL, 5, NULL);
+	xTaskCreate(log_transfer_task,
+		    "log_xfer_task",
+		    4096,
+		    NULL,
+		    5,
+		    NULL);
 }
