@@ -47,8 +47,8 @@ void HubController::processIncomingData() {
     // Check for new data from BLE
     CutEvent* event = bleHandler->getNextEvent();
     if (event != nullptr) {
-        ESP_LOGI(TAG, "Received event #%d: Lat=%.6f, Lon=%.6f, Force=%.2f", 
-                 event->sequence_id, event->latitude, event->longitude, event->force);
+        ESP_LOGI(TAG, "Received event #%lu: Lat=%.6f, Lon=%.6f, Force=%.2f", 
+                 (unsigned long)event->sequence_id, event->latitude, event->longitude, event->force);
         
         // Store in database
         if (dataManager->storeEvent(*event)) {

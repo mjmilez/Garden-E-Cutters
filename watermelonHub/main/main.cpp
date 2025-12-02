@@ -8,6 +8,12 @@
 #include "esp_event.h"
 #include <string.h>
 
+extern "C" {
+    #include "base_ble.h"
+    #include "base_led.h"
+    #include "log_paths.h"
+}
+
 static const char* TAG = "MAIN";
 
 esp_err_t init_wifi_ap() {
@@ -73,6 +79,9 @@ extern "C" void app_main(void) {
     };
     ESP_ERROR_CHECK(esp_vfs_spiffs_register(&conf));
     
+    baseLedInit();
+    baseLedSetBlinking(true);
+
     ret = init_wifi_ap();
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to initialize WiFi AP: %s", esp_err_to_name(ret));
@@ -81,6 +90,17 @@ extern "C" void app_main(void) {
     } else {
         ESP_LOGI(TAG, "WiFi AP initialized successfully");
     }
+
+    bleBaseInit([](bool connected) {
+        if (connected) {
+            baseLedSetSolidOn();
+            ESP_LOGI(TAG, "Connected to shears!");
+            bleBaseRequestLog("gps_points.csv");
+        } else {
+            baseLedSetBlinking(true);
+            ESP_LOGI(TAG, "Disconnected from shears");
+        }
+    });
 
     // Create hub controller
     hub = new HubController();
