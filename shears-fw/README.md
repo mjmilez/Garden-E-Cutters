@@ -163,8 +163,5 @@ idf.py -p COM5 monitor
 
 ## Next Steps
 
-- Add BLE telemetry characteristics (force sensor, pressure, cutter angle, etc.).
-- Allow the base to remotely trigger a GPS save.  
-- Implement sleep/wake behavior for power management.
-- Add per-chunk or per-entry CRC to improve file integrity.
+- Add CRC to improve file integrity.
 - Add a queueing mechanism on the shears to delete log entries once acknowledged by the base.
