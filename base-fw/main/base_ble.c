@@ -1,15 +1,17 @@
-/**
- * @file base_ble.c
- * @brief BLE central logic for the base station that talks to the shears'
- *        log-transfer service.
+/*
+ * base_ble.c
  *
- * High-level flow:
- *  - bring up NimBLE and set our GAP name
- *  - scan for advertisements from "WM-SHEARS"
- *  - connect when we see it
- *  - discover the custom log service + control/data characteristics
- *  - enable notifications and pass the handles into log_transfer_client
- *  - bleBaseRequestLog() lets the rest of the app ask for a log file by name
+ * BLE central logic for the base station.
+ * Connects to the shears (WM-SHEARS), discovers the log-transfer service,
+ * enables notifications, and routes incoming data into log_transfer_client.
+ *
+ * Rough flow:
+ *   - init NimBLE + GAP name
+ *   - scan for "WM-SHEARS"
+ *   - connect
+ *   - discover log service + CTRL/DATA characteristics
+ *   - enable notifications
+ *   - forward notifications to log_transfer_client
  */
 
 #include "base_ble.h"
@@ -30,27 +32,27 @@
 #include "services/gatt/ble_svc_gatt.h"
 
 #include "log_transfer_client.h"
-#include "log_paths.h"   // for GPS_LOG_FILE_BASENAME etc.
+#include "log_paths.h"   /* GPS_LOG_FILE_BASENAME etc. */
 
 static const char *TAG = "base_ble";
 
-/* Address type chosen by the NimBLE host after sync */
+/* Address type selected by the NimBLE host after sync. */
 static uint8_t ownAddrType;
 
-/* BLE name of the shears unit we want to connect to */
+/* Target peripheral name advertised by the shears. */
 static const char *targetName = "WM-SHEARS";
 
-/* Optional app callback to report connection state */
+/* Optional callback for connection state changes. */
 static bleBaseConnCallback_t connCallback = NULL;
 
-/* Connection + log-service state discovered after we connect */
+/* Connection + discovered handles (valid after connect + GATT discovery). */
 static uint16_t s_connHandle        = 0;
 static uint16_t s_logSvcStart       = 0;
 static uint16_t s_logSvcEnd         = 0;
 static uint16_t s_logCtrlChrHandle  = 0;
 static uint16_t s_logDataChrHandle  = 0;
 
-/* If the app asks for a log before discovery finishes, we stash it here */
+/* Pending request storage if a log is requested before discovery finishes. */
 static bool  s_pendingRequest       = false;
 static char  s_pendingFilename[64]  = {0};
 
@@ -68,10 +70,9 @@ static int  gattDiscChrCb(uint16_t conn_handle,
                            const struct ble_gatt_chr *chr,
                            void *arg);
 
-/* -------------------------------------------------------------------------- */
-/* Helper: pull the device name out of advertising data                       */
-/* -------------------------------------------------------------------------- */
+/* --- Advertising helpers -------------------------------------------------- */
 
+/* Extract the advertised device name (if present). */
 static void getAdvName(const struct ble_hs_adv_fields *fields,
                        char *out,
                        size_t outLen)
@@ -88,10 +89,9 @@ static void getAdvName(const struct ble_hs_adv_fields *fields,
 	}
 }
 
-/* -------------------------------------------------------------------------- */
-/* GATT discovery: find the log service + its two characteristics             */
-/* -------------------------------------------------------------------------- */
+/* --- GATT discovery ------------------------------------------------------- */
 
+/* Custom log-transfer service layout on the shears. */
 #define LOG_SVC_UUID       0xFFF0
 #define LOG_CTRL_CHR_UUID  0xFFF1
 #define LOG_DATA_CHR_UUID  0xFFF2
@@ -104,9 +104,7 @@ static int gattDiscSvcCb(uint16_t conn_handle,
 	(void)arg;
 
 	if (error->status == 0) {
-		/* While discovery is running, this gets called per service.
-		 * We only care about the single 0xFFF0 service that carries log transfer.
-		 */
+		/* Called once per discovered service. */
 		uint16_t uuid16 = ble_uuid_u16(&service->uuid.u);
 		if (uuid16 == LOG_SVC_UUID) {
 			s_logSvcStart = service->start_handle;
@@ -117,10 +115,10 @@ static int gattDiscSvcCb(uint16_t conn_handle,
 		return 0;
 	}
 
-	/* Once NimBLE is done walking services, it reports BLE_HS_EDONE */
+	/* Discovery complete marker from NimBLE. */
 	if (error->status == BLE_HS_EDONE) {
 		if (s_logSvcStart != 0 && s_logSvcEnd != 0) {
-			/* Now walk characteristics inside the log service. */
+			/* Discover characteristics inside the log service range. */
 			int rc = ble_gattc_disc_all_chrs(conn_handle,
 			                                 s_logSvcStart,
 			                                 s_logSvcEnd,
@@ -145,7 +143,7 @@ static int gattDiscChrCb(uint16_t conn_handle,
 	(void)arg;
 
 	if (error->status == 0) {
-		/* Same pattern as services: this is called once per characteristic. */
+		/* Called once per discovered characteristic. */
 		uint16_t uuid16 = ble_uuid_u16(&chr->uuid.u);
 
 		if (uuid16 == LOG_CTRL_CHR_UUID) {
@@ -161,14 +159,12 @@ static int gattDiscChrCb(uint16_t conn_handle,
 	}
 
 	if (error->status == BLE_HS_EDONE) {
-		/* At this point characteristic discovery for the service is finished.
-		 * We don't start the log client until we've found both handles.
-		 */
+		/* Characteristic discovery finished for this service. */
 		if (s_logCtrlChrHandle != 0 && s_logDataChrHandle != 0) {
-			/* Turn on notifications by writing the CCCD (0x2902).
-			 * In this simple layout the CCCD is val_handle + 1.
+			/* Enable notifications via CCCD (0x2902).
+			 * Assumes CCCD handle is val_handle + 1 for this layout.
 			 */
-			uint8_t cccd_val[2] = {0x01, 0x00};  // notifications enabled
+			uint8_t cccd_val[2] = {0x01, 0x00};
 
 			int rc = ble_gattc_write_flat(conn_handle,
 			                              s_logCtrlChrHandle + 1,
@@ -190,9 +186,7 @@ static int gattDiscChrCb(uint16_t conn_handle,
 				ESP_LOGE(TAG, "Failed to enable NOTIFY on DATA chr rc=%d", rc);
 			}
 
-			/* Now that we know the handles and have notifications turned on,
-			 * wire the connection into the log transfer client.
-			 */
+			/* Wire the discovered handles into the log transfer client. */
 			log_transfer_client_cfg_t cfg = {
 				.connHandle    = conn_handle,
 				.ctrlChrHandle = s_logCtrlChrHandle,
@@ -201,7 +195,7 @@ static int gattDiscChrCb(uint16_t conn_handle,
 			log_transfer_client_init(&cfg);
 			ESP_LOGI(TAG, "Log transfer client initialized");
 
-			/* If the app already asked for a file, kick that request now. */
+			/* Send any queued request that arrived early. */
 			if (s_pendingRequest) {
 				ESP_LOGI(TAG, "Issuing queued log request for '%s'", s_pendingFilename);
 				log_transfer_client_request_file(s_pendingFilename);
@@ -216,9 +210,7 @@ static int gattDiscChrCb(uint16_t conn_handle,
 	return 0;
 }
 
-/* -------------------------------------------------------------------------- */
-/* GAP event handler: scan, connect, discover, and route notifications        */
-/* -------------------------------------------------------------------------- */
+/* --- GAP / connection events --------------------------------------------- */
 
 static void startScan(void);
 
@@ -229,7 +221,7 @@ static int gapEventHandler(struct ble_gap_event *event, void *arg)
 	switch (event->type) {
 
 	case BLE_GAP_EVENT_DISC: {
-		/* Advertising report while we are scanning: filter by name. */
+		/* Advertising report during scanning: filter by device name. */
 		struct ble_hs_adv_fields fields;
 		int rc = ble_hs_adv_parse_fields(&fields,
 		                                 event->disc.data,
@@ -254,7 +246,7 @@ static int gapEventHandler(struct ble_gap_event *event, void *arg)
 		         event->disc.addr.val[1],
 		         event->disc.addr.val[0]);
 
-		/* Stop scanning and initiate connection to this peer. */
+		/* Stop scanning and attempt a connection to this peer. */
 		ble_gap_disc_cancel();
 
 		struct ble_gap_conn_params connParams = {0};
@@ -287,7 +279,7 @@ static int gapEventHandler(struct ble_gap_event *event, void *arg)
 				connCallback(true);
 			}
 
-			/* Reset discovery state and kick off service discovery. */
+			/* Reset discovery state and start service discovery. */
 			s_logSvcStart      = 0;
 			s_logSvcEnd        = 0;
 			s_logCtrlChrHandle = 0;
@@ -319,13 +311,13 @@ static int gapEventHandler(struct ble_gap_event *event, void *arg)
 		break;
 
 	case BLE_GAP_EVENT_DISC_COMPLETE:
-		/* We ran a finite scan and didn't connect to anything. Loop again. */
+		/* Finite scan ended without connecting. */
 		ESP_LOGI(TAG, "Scan complete → restart scanning");
 		startScan();
 		break;
 
 	case BLE_GAP_EVENT_NOTIFY_RX: {
-		/* Notification from the shears: hand it to the log-transfer client. */
+		/* Notification from the shears: route by characteristic handle. */
 		uint16_t attr_handle = event->notify_rx.attr_handle;
 		struct os_mbuf *om   = event->notify_rx.om;
 		uint16_t len         = OS_MBUF_PKTLEN(om);
@@ -351,13 +343,11 @@ static int gapEventHandler(struct ble_gap_event *event, void *arg)
 	return 0;
 }
 
-/* -------------------------------------------------------------------------- */
-/* Scanning + NimBLE stack bring-up                                          */
-/* -------------------------------------------------------------------------- */
+/* --- Scanning + NimBLE bring-up ------------------------------------------ */
 
 static void startScan(void)
 {
-	/* Central-side scan: look for the shears and report results to gapEventHandler. */
+	/* Central scan loop: results are handled by gapEventHandler(). */
 	struct ble_gap_disc_params params = {0};
 
 	params.passive           = 0;
@@ -379,17 +369,17 @@ static void startScan(void)
 
 static void onSync(void)
 {
-	/* Called once the NimBLE host and controller are ready. */
+	/* Runs after the host/controller sync is complete. */
 	int rc = ble_hs_id_infer_auto(0, &ownAddrType);
 	if (rc != 0) {
 		ESP_LOGE(TAG, "Address type error rc=%d", rc);
 		return;
 	}
 
-	/* Give the base a readable GAP name in case we ever need to debug it. */
+	/* GAP name for the base (mostly for debugging). */
 	ble_svc_gap_device_name_set("WM-BASE");
 
-	/* Start the scan loop; everything else is driven from gapEventHandler. */
+	/* Start scanning; the rest is event-driven. */
 	startScan();
 }
 
@@ -400,16 +390,14 @@ static void hostTask(void *param)
 	nimble_port_freertos_deinit();
 }
 
-/* -------------------------------------------------------------------------- */
-/* Public API: base-side BLE lifecycle                                       */
-/* -------------------------------------------------------------------------- */
+/* --- Public API ----------------------------------------------------------- */
 
 void bleBaseInit(bleBaseConnCallback_t cb)
 {
-	/* App calls this once from app_main() to bring up BLE on the base. */
+	/* One-time BLE bring-up for the base. */
 	connCallback = cb;
 
-	/* NVS is required by the controller; handle the "no free pages" case. */
+	/* NVS is required by the BLE controller on ESP-IDF. */
 	esp_err_t ret = nvs_flash_init();
 	if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
 		ESP_ERROR_CHECK(nvs_flash_erase());
@@ -417,26 +405,26 @@ void bleBaseInit(bleBaseConnCallback_t cb)
 	}
 	ESP_ERROR_CHECK(ret);
 
-	/* Wire up NimBLE host config and sync callback. */
+	/* NimBLE host init + sync callback. */
 	nimble_port_init();
 	ble_hs_cfg.sync_cb = onSync;
 
-	/* Register the standard GAP/GATT services (device name, etc.). */
+	/* Standard GAP/GATT services (device name, etc.). */
 	ble_svc_gap_init();
 	ble_svc_gatt_init();
 
-	/* Spin up the NimBLE host on its own FreeRTOS task. */
+	/* NimBLE host runs in its own FreeRTOS task. */
 	nimble_port_freertos_init(hostTask);
 
 	ESP_LOGI(TAG, "BLE init complete");
 }
 
-/**
- * @brief Ask the shears to send a log file by name.
+/*
+ * Requests a log file from the shears by name.
  *
- * If the log service / characteristics are already known, this calls straight
- * into log_transfer_client. If discovery is still in progress, the request is
- * queued and sent once discovery finishes and notifications are enabled.
+ * If discovery is already complete, the request is forwarded directly to
+ * log_transfer_client. Otherwise it gets queued and sent after discovery
+ * finishes and notifications are enabled.
  */
 esp_err_t bleBaseRequestLog(const char *filename)
 {
@@ -444,12 +432,12 @@ esp_err_t bleBaseRequestLog(const char *filename)
 		return ESP_ERR_INVALID_ARG;
 	}
 
-	/* If we already have handles and the client is wired up, go direct. */
+	/* Handles present → client can accept requests. */
 	if (s_logCtrlChrHandle != 0 && s_logDataChrHandle != 0) {
 		return log_transfer_client_request_file(filename);
 	}
 
-	/* Otherwise, remember this request so we can kick it after discovery. */
+	/* Discovery still running → stash and send later. */
 	strncpy(s_pendingFilename, filename, sizeof(s_pendingFilename));
 	s_pendingFilename[sizeof(s_pendingFilename) - 1] = '\0';
 	s_pendingRequest = true;

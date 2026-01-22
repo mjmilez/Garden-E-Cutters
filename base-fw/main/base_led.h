@@ -1,13 +1,15 @@
-/**
- * @file base_led.h
- * @brief Status LED driver for the base station.
+/*
+ * base_led.h
  *
- * This module isolates all LED-related behavior:
- *  - GPIO configuration
- *  - Dedicated FreeRTOS blinking task
- *  - Functions to switch between blinking/solid/off
+ * Status LED interface for the base station.
  *
- * The BLE module calls baseLedSetBlinking()/SolidOn() depending on the link state.
+ * This module centralizes all LED-related behavior:
+ *   - GPIO configuration
+ *   - Background blinking task
+ *   - Simple helpers for blink / solid / off states
+ *
+ * Higher-level modules (e.g. BLE) drive the LED state
+ * based on connection status.
  */
 
 #pragma once
@@ -15,10 +17,11 @@
 #include "driver/gpio.h"
 #include <stdbool.h>
 
-/* Hardware GPIO used for base station status LED */
+/* GPIO used for the base station status LED. */
 #define BASE_STATUS_LED_GPIO GPIO_NUM_33
 
-/* Public API */
+/* --- Public API ----------------------------------------------------------- */
+
 void baseLedInit(void);
 void baseLedSetBlinking(bool enable);
 void baseLedSetSolidOn(void);

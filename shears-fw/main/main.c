@@ -1,12 +1,14 @@
 /*
+ * main.c
+ *
  * Top-level entry point for the shears firmware.
  *
- * Responsibilities:
- *   - bring up the status LED subsystem
+ * Startup sequence:
+ *   - initialize the status LED subsystem
  *   - start the GPS logger (SPIFFS, UART, button ISR, background tasks)
- *   - start BLE peripheral mode and begin advertising as "WM-SHEARS"
+ *   - start BLE in peripheral mode and advertise as "WM-SHEARS"
  *
- * All ongoing work (GPS reads, save requests, BLE reads/writes, log transfers)
+ * Ongoing work (GPS reads, save requests, BLE activity, log transfers)
  * runs inside module-specific FreeRTOS tasks.
  */
 
@@ -14,33 +16,34 @@
 #include "shears_ble.h"
 #include "gps_logger.h"
 
-/*
- * BLE connection callback from shearsBleInit().
- * Controls the LED to show link state to the base.
- */
+/* --- BLE connection state ------------------------------------------------- */
+
+/* Connection callback used by the BLE layer to drive LED state. */
 static void bleConnChanged(bool connected)
 {
 	if (connected) {
-		/* Connected to base → solid LED. */
+		/* Connected to the base: solid LED. */
 		shearsLedSetSolidOn();
 	} else {
-		/* Not connected → blink while advertising. */
+		/* Not connected: blink while advertising. */
 		shearsLedSetOff();
 		shearsLedSetBlinking(true);
 	}
 }
 
+/* --- Entry point ---------------------------------------------------------- */
+
 void app_main(void)
 {
-	/* Bring up LED status system; blink while waiting for connection. */
+	/* Initialize status LED and indicate idle/advertising state. */
 	shearsLedInit();
 	shearsLedSetBlinking(true);
 
-	/* Bring up GPS logging subsystem (SPIFFS, UART, button, tasks). */
+	/* Start GPS logging subsystem. */
 	gpsLoggerInit();
 
-	/* Bring up BLE peripheral mode and begin advertising as WM-SHEARS. */
+	/* Start BLE peripheral mode and begin advertising. */
 	shearsBleInit(bleConnChanged);
 
-	/* Foreground is idle; all modules run in their own FreeRTOS tasks. */
+	/* Foreground remains idle; work is handled by background tasks. */
 }

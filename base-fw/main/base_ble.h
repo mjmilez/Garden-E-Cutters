@@ -1,36 +1,35 @@
+/*
+ * base_ble.h
+ *
+ * Base-side BLE interface.
+ *
+ * Exposes a small public API for bringing up the BLE central and requesting
+ * log files from WM-SHEARS. Connection and discovery details stay internal
+ * to base_ble.c.
+ */
+
 #pragma once
 
 #include <stdbool.h>
 #include "esp_err.h"
 
 /*
- * App-level notification for base BLE link status.
- *
- * This fires whenever our connection to WM-SHEARS comes up or goes down:
- *   connected = true  → we have an active link to the shears
- *   connected = false → no link; we are (or will be) scanning
- *
- * Typical use: update a status LED or let the UI know that log requests
- * can be made.
+ * Connection state callback used by the application for simple status updates.
  */
 typedef void (*bleBaseConnCallback_t)(bool connected);
 
 /*
- * Bring up NimBLE on the base and start scanning for "WM-SHEARS".
- *
- * This should be called once from app_main(). All GAP/GATT events are
- * handled inside base_ble.c; the app just gets high-level connect/disconnect
- * via the callback.
+ * Initializes BLE on the base and starts scanning for WM-SHEARS.
  */
 void bleBaseInit(bleBaseConnCallback_t cb);
 
 /*
- * Ask the shears to send a log file over the custom log-transfer service.
+ * Requests a log file from the shears over the log-transfer service.
  *
- * The filename should be whatever the shears side passes into fopen(),
- * e.g. "/spiffs/gps_log.csv" or "session_0001.csv".
+ * The filename must match the path expected by the shears-side filesystem
+ * (e.g. "/spiffs/gps_log.csv", "session_0001.csv").
  *
- * If the log service has not finished GATT discovery yet, the request is
- * queued and sent once discovery completes.
+ * If GATT discovery has not completed yet, the request is queued and sent
+ * once the service and characteristics are ready.
  */
 esp_err_t bleBaseRequestLog(const char *filename);

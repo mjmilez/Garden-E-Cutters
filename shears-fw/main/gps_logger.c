@@ -1,14 +1,14 @@
 /*
+ * gps_logger.c
+ *
  * GPS NMEA logger for the shears firmware.
  *
  * Responsibilities:
- *   - mount SPIFFS and make sure /spiffs/gps_points.csv exists with a header
+ *   - mount SPIFFS and ensure gps_points.csv exists with a header
  *   - configure UART2 for 9600 baud NMEA input
  *   - keep the most recent full NMEA sentence in latestNmea[]
- *   - expose a "save" mechanism driven by:
- *       - a physical button on GPIO 23, or
- *       - gpsLoggerRequestSave() from elsewhere in the firmware
- *   - when a save is requested, parse $GPGGA and append one CSV row
+ *   - accept save requests from a GPIO button or gpsLoggerRequestSave()
+ *   - on save, parse $GPGGA and append one CSV row
  */
 
 #include "gps_logger.h"
@@ -29,24 +29,24 @@
 
 #include "log_paths.h"
 
-/* UART configuration for GPS NMEA input */
+/* UART configuration for GPS NMEA input. */
 #define GPS_UART_NUM   UART_NUM_2
 #define GPS_UART_RX    GPIO_NUM_16
 #define GPS_UART_TX    GPIO_NUM_17
 #define GPS_BUF_SIZE   512
 
-/* GPIO for the "save GPS point" button */
+/* GPIO used for the "save GPS point" button. */
 #define GPS_BUTTON_PIN GPIO_NUM_23
 
 static const char *TAG = "gps_logger";
 
-/* Last complete NMEA sentence we saw from the GPS receiver */
+/* Most recent complete NMEA sentence from the GPS receiver. */
 static char latestNmea[GPS_BUF_SIZE];
 
-/* Set from ISR or API when a save should happen */
+/* Save request flag set by ISR or API and handled by saveTask(). */
 static volatile bool saveRequestedFlag = false;
 
-/* Forward declarations */
+/* Forward declarations. */
 static void buttonIsrHandler(void *arg);
 static void uartReadTask(void *arg);
 static void saveTask(void *arg);
@@ -55,25 +55,18 @@ static double nmeaToDecimal(const char *nmea_val, char hemisphere);
 static void storeGgaCsv(const char *nmea);
 static void printCsvFile(void);
 
-/*
- * GPIO ISR for the physical "save" button.
- *
- * Keep this fast: just set a flag and let a task do the real work.
- */
+/* --- Button ISR ----------------------------------------------------------- */
+
+/* ISR for the physical save button. */
 static void IRAM_ATTR buttonIsrHandler(void *arg)
 {
 	(void)arg;
 	saveRequestedFlag = true;
 }
 
-/*
- * Task that reads raw bytes from UART2 and assembles NMEA lines.
- *
- * Behavior:
- *   - read up to GPS_BUF_SIZE - 1 bytes at a time
- *   - accumulate into nmea_buf until a '\n' is seen
- *   - on newline, null terminate and copy into latestNmea[]
- */
+/* --- UART reader ---------------------------------------------------------- */
+
+/* Reads UART bytes and assembles complete NMEA lines into latestNmea[]. */
 static void uartReadTask(void *arg)
 {
 	(void)arg;
@@ -96,7 +89,6 @@ static void uartReadTask(void *arg)
 					nmea_buf[nmea_len++] = c;
 				}
 
-				/* Seen newline, treat this as one complete sentence. */
 				if (c == '\n') {
 					nmea_buf[nmea_len] = '\0';
 					strncpy(latestNmea, nmea_buf, GPS_BUF_SIZE);
@@ -109,12 +101,9 @@ static void uartReadTask(void *arg)
 	}
 }
 
-/*
- * Convert NMEA coordinate format to decimal degrees.
- *
- * NMEA format is ddmm.mmmm for latitude and dddmm.mmmm for longitude.
- * Example: "2934.5678", 'N' becomes 29 + (34.5678 / 60).
- */
+/* --- NMEA parsing --------------------------------------------------------- */
+
+/* Converts NMEA coordinate format (ddmm.mmmm / dddmm.mmmm) to decimal degrees. */
 static double nmeaToDecimal(const char *nmea_val, char hemisphere)
 {
 	double val = atof(nmea_val);
@@ -129,17 +118,9 @@ static double nmeaToDecimal(const char *nmea_val, char hemisphere)
 	return decimal;
 }
 
-/*
- * Parse a $GPGGA sentence and append one CSV row to gps_points.csv.
- *
- * If the sentence is not $GPGGA this is a no-op.
- * CSV columns:
- *   utc_time, latitude, longitude, fix_quality, num_satellites,
- *   hdop, altitude, geoid_height
- */
+/* Parses a $GPGGA sentence and appends one CSV row to gps_points.csv. */
 static void storeGgaCsv(const char *nmea)
 {
-	/* Only care about GPGGA for now. */
 	if (strncmp(nmea, "$GPGGA,", 7) != 0) {
 		return;
 	}
@@ -156,7 +137,6 @@ static void storeGgaCsv(const char *nmea)
 		tok = strtok(NULL, ",");
 	}
 
-	/* Need enough tokens to index everything below. */
 	if (i < 12) {
 		ESP_LOGW(TAG, "GPGGA sentence too short, i=%d", i);
 		return;
@@ -193,9 +173,9 @@ static void storeGgaCsv(const char *nmea)
 	         utc_time, lat, lon);
 }
 
-/*
- * Dump gps_points.csv to the log for quick inspection.
- */
+/* --- CSV helpers ---------------------------------------------------------- */
+
+/* Prints the CSV file contents to the log for quick inspection. */
 static void printCsvFile(void)
 {
 	FILE *f = fopen(GPS_LOG_FILE_PATH, "r");
@@ -213,9 +193,9 @@ static void printCsvFile(void)
 	fclose(f);
 }
 
-/*
- * Mount SPIFFS and make sure gps_points.csv exists and has a header row.
- */
+/* --- SPIFFS --------------------------------------------------------------- */
+
+/* Mounts SPIFFS and ensures gps_points.csv exists with a header row. */
 static void initSpiffs(void)
 {
 	esp_vfs_spiffs_conf_t conf = {
@@ -234,7 +214,6 @@ static void initSpiffs(void)
 
 	ESP_LOGI(TAG, "SPIFFS mounted");
 
-	/* If the CSV does not exist yet, create it and write the header. */
 	FILE *f = fopen(GPS_LOG_FILE_PATH, "r");
 	if (!f) {
 		f = fopen(GPS_LOG_FILE_PATH, "w");
@@ -252,14 +231,9 @@ static void initSpiffs(void)
 	}
 }
 
-/*
- * Task that handles save requests, from either the button or the API.
- *
- * Whenever saveRequestedFlag is set this will:
- *   - clear the flag
- *   - push the current latestNmea through storeGgaCsv()
- *   - optionally dump the CSV for debugging
- */
+/* --- Save handler --------------------------------------------------------- */
+
+/* Handles save requests and appends a CSV entry from latestNmea[]. */
 static void saveTask(void *arg)
 {
 	(void)arg;
@@ -271,7 +245,7 @@ static void saveTask(void *arg)
 			ESP_LOGI(TAG, "Save requested; latest NMEA: %s", latestNmea);
 			storeGgaCsv(latestNmea);
 
-			/* Optional debug: show the file contents. */
+			/* Debug output for transfer verification. */
 			printCsvFile();
 		}
 
@@ -279,14 +253,13 @@ static void saveTask(void *arg)
 	}
 }
 
-/* Public API */
+/* --- Public API ----------------------------------------------------------- */
 
 void gpsLoggerInit(void)
 {
-	/* Bring up SPIFFS and ensure the CSV exists. */
 	initSpiffs();
 
-	/* Configure UART2 for NMEA at 9600 baud, 8N1, no flow control. */
+	/* UART2: 9600 baud, 8N1, no flow control. */
 	uart_config_t uart_config = {
 		.baud_rate = 9600,
 		.data_bits = UART_DATA_8_BITS,
@@ -305,10 +278,7 @@ void gpsLoggerInit(void)
 
 	ESP_LOGI(TAG, "UART2 configured for GPS at 9600 baud");
 
-	/*
-	 * Configure the button GPIO as input with internal pull-up and a
-	 * falling edge interrupt for button press.
-	 */
+	/* Button input with pull-up and falling-edge interrupt. */
 	gpio_config_t io_conf = {
 		.pin_bit_mask = 1ULL << GPS_BUTTON_PIN,
 		.mode         = GPIO_MODE_INPUT,
@@ -323,7 +293,6 @@ void gpsLoggerInit(void)
 
 	ESP_LOGI(TAG, "Button interrupt configured on GPIO %d", GPS_BUTTON_PIN);
 
-	/* Start UART reader and save handler tasks. */
 	xTaskCreate(uartReadTask, "gps_uart_read", 4096, NULL, 5, NULL);
 	xTaskCreate(saveTask, "gps_save_task", 4096, NULL, 5, NULL);
 }

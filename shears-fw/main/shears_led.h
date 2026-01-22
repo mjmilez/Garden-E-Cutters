@@ -1,11 +1,11 @@
-/**
- * @file shears_led.h
- * @brief Status LED driver for the shears node.
+/*
+ * shears_led.h
  *
- * This module owns:
- *  - GPIO config for the shears status LED
- *  - A FreeRTOS task that implements the blink behavior
- *  - Simple functions to switch between blink / solid / off
+ * Status LED interface for the shears node.
+ *
+ * Provides GPIO configuration and a small control API for driving the
+ * shears status LED. Blink timing is handled internally by a background
+ * FreeRTOS task.
  */
 
 #pragma once
@@ -13,34 +13,19 @@
 #include "driver/gpio.h"
 #include <stdbool.h>
 
-/* Hardware GPIO used for the shears status LED */
+/* GPIO used for the shears status LED. */
 #define SHEARS_STATUS_LED_GPIO GPIO_NUM_33
 
-/**
- * @brief Initialize the status LED and start its background task.
- *
- * Call this once from app_main() before using any other shearsLed* functions.
- */
+/* --- Public API ----------------------------------------------------------- */
+
+/* Initializes the status LED and starts the background blink task. */
 void shearsLedInit(void);
 
-/**
- * @brief Enable or disable blinking mode.
- *
- * When enabled, the LED blinks at ~10 Hz while the background task runs.
- * When disabled, the LED stays in whatever solid state the other setters choose.
- */
+/* Enables or disables blinking mode. */
 void shearsLedSetBlinking(bool enable);
 
-/**
- * @brief Force the LED to solid ON.
- *
- * Also disables blinking.
- */
+/* Forces the LED to a solid ON state and disables blinking. */
 void shearsLedSetSolidOn(void);
 
-/**
- * @brief Force the LED to OFF.
- *
- * Also disables blinking.
- */
+/* Forces the LED to OFF and disables blinking. */
 void shearsLedSetOff(void);

@@ -1,13 +1,14 @@
-/**
- * @file base_led.c
- * @brief Implements the status LED logic for the base station.
+/*
+ * base_led.c
  *
- * The LED has two behaviors:
- *   1. Fast blink (100ms on/off) — scanning or trying to connect
- *   2. Solid ON — connected to shears
+ * Status LED control for the base station.
  *
- * The blinking is handled by a dedicated FreeRTOS task so that
- * LED behavior never blocks BLE or UI logic.
+ * The LED exposes two visible states:
+ *   - Fast blink (100 ms on / 100 ms off): scanning or attempting to connect
+ *   - Solid ON: connected to the shears
+ *
+ * Blinking is handled in a dedicated FreeRTOS task so LED timing
+ * does not block BLE or application logic.
  */
 
 #include "base_led.h"
@@ -16,88 +17,85 @@
 #include "freertos/task.h"
 #include "driver/gpio.h"
 
-/* Task handle for the LED blinking task */
+/* Task handle for the LED background task. */
 static TaskHandle_t ledTaskHandle = NULL;
 
-/* Whether the LED task should blink (true) or stay steady (false) */
+/* Current LED mode: blinking (true) or steady (false). */
 static volatile bool ledBlinking = false;
 
-/**
- * @brief Background LED task.
- *
- * This task loops forever:
- *  - If blinking enabled → flash LED
- *  - If not blinking → remain idle (solid ON/OFF already set)
- */
-static void ledTask(void *arg) {
-    while (1) {
-        if (ledBlinking) {
-            /* LED ON */
-            gpio_set_level(BASE_STATUS_LED_GPIO, 1);
-            vTaskDelay(pdMS_TO_TICKS(100));
+/* --- LED task ------------------------------------------------------------- */
 
-            /* Check again before turning OFF in case state changed */
-            if (!ledBlinking) {
-                continue;
-            }
+/* Background task that drives the LED state. */
+static void ledTask(void *arg)
+{
+	(void)arg;
 
-            /* LED OFF */
-            gpio_set_level(BASE_STATUS_LED_GPIO, 0);
-            vTaskDelay(pdMS_TO_TICKS(100));
-        } else {
-            /* Idle quickly (no blink) */
-            vTaskDelay(pdMS_TO_TICKS(50));
-        }
-    }
+	while (1) {
+		if (ledBlinking) {
+			/* LED ON phase. */
+			gpio_set_level(BASE_STATUS_LED_GPIO, 1);
+			vTaskDelay(pdMS_TO_TICKS(100));
+
+			/* Re-check state in case blinking was disabled mid-cycle. */
+			if (!ledBlinking) {
+				continue;
+			}
+
+			/* LED OFF phase. */
+			gpio_set_level(BASE_STATUS_LED_GPIO, 0);
+			vTaskDelay(pdMS_TO_TICKS(100));
+		} else {
+			/* Idle delay when not blinking. */
+			vTaskDelay(pdMS_TO_TICKS(50));
+		}
+	}
 }
 
-/**
- * @brief Initialize LED GPIO and start LED task.
- */
-void baseLedInit(void) {
-    gpio_config_t io_conf = {
-        .pin_bit_mask = 1ULL << BASE_STATUS_LED_GPIO,
-        .mode = GPIO_MODE_OUTPUT,
-        .pull_up_en = GPIO_PULLUP_DISABLE,
-        .pull_down_en = GPIO_PULLDOWN_DISABLE,
-        .intr_type = GPIO_INTR_DISABLE
-    };
+/* --- Public API ----------------------------------------------------------- */
 
-    gpio_config(&io_conf);
+void baseLedInit(void)
+{
+	/* Configure the status LED GPIO as output. */
+	gpio_config_t io_conf = {
+		.pin_bit_mask = 1ULL << BASE_STATUS_LED_GPIO,
+		.mode         = GPIO_MODE_OUTPUT,
+		.pull_up_en   = GPIO_PULLUP_DISABLE,
+		.pull_down_en = GPIO_PULLDOWN_DISABLE,
+		.intr_type    = GPIO_INTR_DISABLE
+	};
 
-    /* LED starts OFF */
-    gpio_set_level(BASE_STATUS_LED_GPIO, 0);
+	gpio_config(&io_conf);
 
-    /* Start the LED task */
-    xTaskCreate(ledTask, "base_led", 2048, NULL, 5, &ledTaskHandle);
+	/* Default LED state on boot is OFF. */
+	gpio_set_level(BASE_STATUS_LED_GPIO, 0);
+
+	/* Start the LED background task. */
+	xTaskCreate(ledTask,
+	            "base_led",
+	            2048,
+	            NULL,
+	            5,
+	            &ledTaskHandle);
 }
 
-/**
- * @brief Enable or disable blinking mode.
- *
- * @param enable true → blink, false → stop blinking
- */
-void baseLedSetBlinking(bool enable) {
-    ledBlinking = enable;
+void baseLedSetBlinking(bool enable)
+{
+	ledBlinking = enable;
 
-    if (!enable) {
-        /* When stopping blinking, default to solid ON */
-        gpio_set_level(BASE_STATUS_LED_GPIO, 1);
-    }
+	if (!enable) {
+		/* When blinking is disabled, default to solid ON. */
+		gpio_set_level(BASE_STATUS_LED_GPIO, 1);
+	}
 }
 
-/**
- * @brief Set the LED to solid ON state.
- */
-void baseLedSetSolidOn(void) {
-    ledBlinking = false;
-    gpio_set_level(BASE_STATUS_LED_GPIO, 1);
+void baseLedSetSolidOn(void)
+{
+	ledBlinking = false;
+	gpio_set_level(BASE_STATUS_LED_GPIO, 1);
 }
 
-/**
- * @brief Turn the LED completely OFF.
- */
-void baseLedSetOff(void) {
-    ledBlinking = false;
-    gpio_set_level(BASE_STATUS_LED_GPIO, 0);
+void baseLedSetOff(void)
+{
+	ledBlinking = false;
+	gpio_set_level(BASE_STATUS_LED_GPIO, 0);
 }

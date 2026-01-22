@@ -1,3 +1,16 @@
+/*
+ * log_transfer_client.c
+ *
+ * Base-side client for the log transfer protocol.
+ *
+ * High-level behavior:
+ *   - START_TRANSFER is written to the control characteristic with a filename
+ *   - status updates arrive on the control characteristic
+ *   - file chunks arrive on the data characteristic
+ *   - payload is written to SPIFFS when available, otherwise stored in RAM
+ *   - on completion, the first few lines are printed for a quick sanity check
+ */
+
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -9,33 +22,18 @@
 
 #include "log_transfer_client.h"
 #include "log_transfer_protocol.h"
-#include "log_paths.h"   // GPS_LOG_FILE_PATH, GPS_LOG_FILE_BASENAME
+#include "log_paths.h"   /* GPS_LOG_FILE_PATH, GPS_LOG_FILE_BASENAME */
 
 static const char *TAG = "log_xfer_cli";
 
-/*
- * Client side of the log transfer protocol on the base.
- *
- * Flow is:
- *   - app calls log_transfer_client_request_file() with a filename
- *   - we write a START_TRANSFER command to the control characteristic
- *   - the shears replies on the control characteristic with STATUS_*
- *   - on STATUS_OK we allocate storage (SPIFFS file or RAM) and mark the
- *     transfer as active
- *   - incoming DATA notifications are appended to file or RAM
- *   - on STATUS_TRANSFER_DONE we close things out and dump the first few lines
- */
-
-/* -------------------------------------------------------------------------- */
-/* Internal state                                                             */
-/* -------------------------------------------------------------------------- */
+/* --- Internal state ------------------------------------------------------- */
 
 typedef struct {
 	bool     active;
-	char     requestedName[64];   // name we asked the shears for (basename)
-	FILE    *fp;                  // local file on base (if FS works)
+	char     requestedName[64];   /* name requested from the shears */
+	FILE    *fp;                  /* local output file (SPIFFS) */
 
-	// RAM fallback when filesystem is unavailable
+	/* RAM fallback when filesystem output is unavailable. */
 	uint8_t *buf;
 	uint32_t buf_size;
 
@@ -47,12 +45,10 @@ typedef struct {
 static log_transfer_client_cfg_t g_cfg;
 static base_log_transfer_state_t g_state;
 
-/* Forward declaration so STATUS_TRANSFER_DONE can call into it */
+/* Debug helper used after transfer completion. */
 static void dump_downloaded_file(void);
 
-/* -------------------------------------------------------------------------- */
-/* Public API                                                                 */
-/* -------------------------------------------------------------------------- */
+/* --- Public API ----------------------------------------------------------- */
 
 void log_transfer_client_init(const log_transfer_client_cfg_t *cfg)
 {
@@ -72,10 +68,8 @@ void log_transfer_client_set_conn_handle(uint16_t connHandle)
 }
 
 /*
- * Base → Shears: send START_TRANSFER with the requested filename.
- *
- * The filename here is whatever the shears understands and turns into a
- * full path, for example "gps_points.csv" or "session_0001.csv".
+ * Sends START_TRANSFER with the requested filename over the control
+ * characteristic.
  */
 esp_err_t log_transfer_client_request_file(const char *filename)
 {
@@ -118,9 +112,7 @@ esp_err_t log_transfer_client_request_file(const char *filename)
 	return ESP_OK;
 }
 
-/* -------------------------------------------------------------------------- */
-/* Notification handlers (Shears → Base)                                      */
-/* -------------------------------------------------------------------------- */
+/* --- Notification handlers ------------------------------------------------ */
 
 void log_transfer_client_on_ctrl_notify(const uint8_t *data, uint16_t len)
 {
@@ -145,7 +137,7 @@ void log_transfer_client_on_ctrl_notify(const uint8_t *data, uint16_t len)
 	switch (st) {
 
 	case STATUS_OK: {
-		/* Shears accepted the request and is telling us the file size. */
+		/* Request accepted; payload includes the file size. */
 		if (len < 6) {
 			ESP_LOGW(TAG, "STATUS_OK without size field");
 			return;
@@ -154,7 +146,7 @@ void log_transfer_client_on_ctrl_notify(const uint8_t *data, uint16_t len)
 		uint32_t fileSize = 0;
 		memcpy(&fileSize, &data[2], sizeof(fileSize));
 
-		/* Clear out any previous transfer state. */
+		/* Tear down any previous transfer state. */
 		if (g_state.active) {
 			if (g_state.fp) {
 				fclose(g_state.fp);
@@ -167,14 +159,13 @@ void log_transfer_client_on_ctrl_notify(const uint8_t *data, uint16_t len)
 			}
 		}
 
-		/* First choice is to stream into a real file on /spiffs. */
+		/* Primary destination is SPIFFS; fall back to RAM on failure. */
 		g_state.fp = fopen(GPS_LOG_FILE_PATH, "wb");
 		if (!g_state.fp) {
 			ESP_LOGE(TAG,
 			         "Failed to open local file '%s', using RAM buffer only",
 			         GPS_LOG_FILE_PATH);
 
-			/* Fallback: store the entire file in memory. */
 			g_state.buf = (uint8_t *)malloc(fileSize);
 			if (!g_state.buf) {
 				ESP_LOGE(TAG, "RAM allocation failed for %u bytes", fileSize);
@@ -201,7 +192,7 @@ void log_transfer_client_on_ctrl_notify(const uint8_t *data, uint16_t len)
 	}
 
 	case STATUS_TRANSFER_DONE:
-		/* Shears is done sending data. Close up and inspect what we got. */
+		/* Transfer complete; close outputs and print a short preview. */
 		if (g_state.active) {
 			ESP_LOGI(TAG,
 			         "Transfer finished from shears: received=%u bytes, expected=%u",
@@ -217,7 +208,6 @@ void log_transfer_client_on_ctrl_notify(const uint8_t *data, uint16_t len)
 
 		g_state.active = false;
 
-		/* Dump contents from RAM or file so we can sanity check the transfer. */
 		dump_downloaded_file();
 		break;
 
@@ -265,7 +255,7 @@ void log_transfer_client_on_data_notify(const uint8_t *data, uint16_t len)
 		return;
 	}
 
-	/* First two bytes are the chunk index, rest is payload. */
+	/* First two bytes are the chunk index, remaining bytes are payload. */
 	uint16_t chunkIndex = 0;
 	memcpy(&chunkIndex, &data[0], sizeof(chunkIndex));
 	ESP_LOGI(TAG, "DATA notify: chunk=%u", chunkIndex);
@@ -279,13 +269,13 @@ void log_transfer_client_on_data_notify(const uint8_t *data, uint16_t len)
 	size_t payloadLen = len - 2;
 	const uint8_t *payload = &data[2];
 
-	/* Append into the file if we are writing to SPIFFS. */
+	/* Stream into SPIFFS if an output file is active. */
 	if (g_state.fp) {
 		size_t written = fwrite(payload, 1, payloadLen, g_state.fp);
 		(void)written;
 	}
 
-	/* And also (or instead) into the RAM buffer if one is active. */
+	/* Optional RAM copy when filesystem output is unavailable. */
 	if (g_state.buf && g_state.buf_size > 0) {
 		if (g_state.bytesReceived + payloadLen <= g_state.buf_size) {
 			memcpy(&g_state.buf[g_state.bytesReceived], payload, payloadLen);
@@ -298,13 +288,11 @@ void log_transfer_client_on_data_notify(const uint8_t *data, uint16_t len)
 	g_state.nextChunkIndex++;
 }
 
-/* -------------------------------------------------------------------------- */
-/* Debug helper: print first lines of downloaded content                      */
-/* -------------------------------------------------------------------------- */
+/* --- Debug helpers -------------------------------------------------------- */
 
 static void dump_downloaded_file(void)
 {
-	/* Prefer the RAM buffer if it exists and has data. */
+	/* Prefer RAM buffer output when available. */
 	if (g_state.buf && g_state.expectedSize > 0) {
 		ESP_LOGI(TAG, "Dumping first lines from RAM buffer (%u bytes):",
 		         g_state.expectedSize);
@@ -314,7 +302,6 @@ static void dump_downloaded_file(void)
 		char line[128];
 		int lineCount = 0;
 
-		/* Interpret bytes as text and log the first few lines. */
 		while (ptr < end && lineCount < 5) {
 			size_t i = 0;
 
@@ -333,7 +320,7 @@ static void dump_downloaded_file(void)
 			}
 		}
 
-		/* Free the RAM buffer after dumping so we do not leak memory. */
+		/* RAM buffer is only retained for the duration of the transfer. */
 		free(g_state.buf);
 		g_state.buf = NULL;
 		g_state.buf_size = 0;
@@ -341,7 +328,7 @@ static void dump_downloaded_file(void)
 		return;
 	}
 
-	/* If there is no RAM buffer, try to read from the file on SPIFFS. */
+	/* Fall back to reading from SPIFFS if no RAM buffer exists. */
 	FILE *fp = fopen(GPS_LOG_FILE_PATH, "rb");
 	if (!fp) {
 		ESP_LOGE(TAG, "Could not open downloaded file '%s' for dump", GPS_LOG_FILE_PATH);
@@ -353,7 +340,7 @@ static void dump_downloaded_file(void)
 	char line[128];
 	int lineCount = 0;
 	while (fgets(line, sizeof(line), fp) && lineCount < 5) {
-		ESP_LOGI(TAG, "%s", line);  // line already has newline
+		ESP_LOGI(TAG, "%s", line);
 		lineCount++;
 	}
 

@@ -1,11 +1,13 @@
 /*
+ * main.c
+ *
  * Base station entry point.
  *
- * Rough flow:
- *   - mount SPIFFS so we have somewhere to put CSV logs
- *   - bring up the status LED
- *   - bring up BLE (as a central) and start scanning for WM-SHEARS
- *   - when the link comes up, switch the LED and kick off a log request
+ * Startup sequence:
+ *   - mount SPIFFS for log storage
+ *   - start the status LED
+ *   - initialize BLE central and scan for WM-SHEARS
+ *   - on connect, request the GPS log
  */
 
 #include <stdbool.h>
@@ -20,10 +22,9 @@
 
 static const char *TAG = "app_main";
 
-/*
- * Mount SPIFFS on the "storage" partition so /spiffs/... is usable.
- * Partition label must match the partition table entry.
- */
+/* --- SPIFFS --------------------------------------------------------------- */
+
+/* Mounts the SPIFFS partition so /spiffs/... paths are available. */
 static void init_spiffs(void)
 {
 	esp_vfs_spiffs_conf_t conf = {
@@ -56,43 +57,36 @@ static void init_spiffs(void)
 	}
 }
 
-/*
- * BLE connection state callback used by base_ble.
- *
- * This is the only place app_main really "reacts" to BLE:
- *   - connected: solid LED, immediately request the GPS log
- *   - not connected: blink LED while we are scanning / reconnecting
- */
+/* --- BLE connection state ------------------------------------------------- */
+
+/* Connection state callback passed into base_ble. */
 static void bleConnChanged(bool connected)
 {
 	if (connected) {
-		/* Solid LED → link is up. */
+		/* Link up: solid LED and request the GPS log. */
 		baseLedSetSolidOn();
 
-		/* Ask the shears for the GPS log by basename.
-		 * Shears side is responsible for adding "/spiffs/".
-		 */
+		/* Shears side resolves basename to its filesystem path. */
 		esp_err_t err = bleBaseRequestLog(GPS_LOG_FILE_BASENAME);
 		if (err != ESP_OK) {
 			ESP_LOGE(TAG, "Failed to request log (%s)", esp_err_to_name(err));
 		}
 	} else {
-		/* Blink while we hunt for the shears. */
+		/* Link down: blink while scanning / reconnecting. */
 		baseLedSetBlinking(true);
 	}
 }
 
+/* --- Entry point ---------------------------------------------------------- */
+
 void app_main(void)
 {
-	/* Make sure /spiffs/gps_points.csv is a valid path on the base. */
 	init_spiffs();
 
-	/* LED starts blinking right away so we have a heartbeat while scanning. */
 	baseLedInit();
 	baseLedSetBlinking(true);
 
-	/* Bring up BLE; scanning begins inside base_ble once the stack syncs. */
 	bleBaseInit(bleConnChanged);
 
-	/* No foreground loop here; BLE and LED work happen in their own tasks. */
+	/* BLE and LED behavior run from their own tasks / callbacks. */
 }

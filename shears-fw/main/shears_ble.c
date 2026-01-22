@@ -1,13 +1,14 @@
-/**
- * @file shears_ble.c
- * @brief Implements BLE peripheral behavior for the shears node.
+/*
+ * shears_ble.c
+ *
+ * BLE peripheral implementation for the shears node.
  *
  * Responsibilities:
- *  - Initialize NimBLE host/controller
- *  - Advertise as "WM-SHEARS" with a custom 0xFFF0 service UUID
- *  - Accept connections from a central (the base station)
- *  - Restart advertising on disconnect
- *  - Notify application layer when the connection is established or lost
+ *   - initialize NimBLE host/controller
+ *   - advertise as "WM-SHEARS" and include the custom 0xFFF0 service UUID
+ *   - accept connections from the base (central)
+ *   - restart advertising on disconnect
+ *   - forward connection state to the application callback
  */
 
 #include "shears_ble.h"
@@ -26,34 +27,29 @@
 #include "services/gap/ble_svc_gap.h"
 #include "services/gatt/ble_svc_gatt.h"
 
-#include "log_transfer_server.h"   /* Log CSV transfer GATT service */
+#include "log_transfer_server.h"   /* Log transfer GATT service */
 
-/* Log tag for this module */
 static const char *TAG = "shears_ble";
 
-/* Device BLE name */
+/* BLE GAP name used for advertising and discovery. */
 static const char *deviceName = "WM-SHEARS";
 
-/* Our own address type (public/random), determined at runtime */
+/* Address type selected by the NimBLE host after sync. */
 static uint8_t ownAddrType;
 
-/* App-supplied callback to report connect/disconnect events */
+/* Optional application callback for connect/disconnect state. */
 static shearsBleConnCallback_t connCallback = NULL;
 
-/* Forward declarations */
+/* Forward declarations. */
 static void startAdvertising(void);
-static int gapEventHandler(struct ble_gap_event *event, void *arg);
+static int  gapEventHandler(struct ble_gap_event *event, void *arg);
 static void onSync(void);
 static void hostTask(void *param);
 
-/**
- * @brief GAP event handler for the shears peripheral.
- *
- * At this point we only care about:
- *  - BLE_GAP_EVENT_CONNECT     : central connected or connect failed
- *  - BLE_GAP_EVENT_DISCONNECT  : link dropped / central disconnected
- */
-static int gapEventHandler(struct ble_gap_event *event, void *arg) {
+/* --- GAP event handler ---------------------------------------------------- */
+
+static int gapEventHandler(struct ble_gap_event *event, void *arg)
+{
 	(void)arg;
 
 	switch (event->type) {
@@ -66,8 +62,8 @@ static int gapEventHandler(struct ble_gap_event *event, void *arg) {
 			}
 		} else {
 			ESP_LOGW(TAG,
-				 "Connect failed (status=%d), restarting advertising",
-				 event->connect.status);
+			         "Connect failed (status=%d), restarting advertising",
+			         event->connect.status);
 
 			if (connCallback) {
 				connCallback(false);
@@ -85,29 +81,29 @@ static int gapEventHandler(struct ble_gap_event *event, void *arg) {
 		break;
 
 	default:
-		/* Other GAP events (MTU updates, PHY changes, etc.) not handled here. */
+		/* Unused GAP events (MTU updates, PHY changes, etc.). */
 		break;
 	}
 
 	return 0;
 }
 
-/**
- * @brief Configure advertising payload and start advertising indefinitely.
- */
-static void startAdvertising(void) {
+/* --- Advertising ---------------------------------------------------------- */
+
+static void startAdvertising(void)
+{
 	struct ble_hs_adv_fields fields;
 	memset(&fields, 0, sizeof(fields));
 
-	/* General discoverable; BR/EDR (classic) unsupported */
+	/* General discoverable; BR/EDR (classic) unsupported. */
 	fields.flags = BLE_HS_ADV_F_DISC_GEN | BLE_HS_ADV_F_BREDR_UNSUP;
 
-	/* Advertise the complete device name "WM-SHEARS" */
+	/* Complete device name. */
 	fields.name = (uint8_t *)deviceName;
 	fields.name_len = strlen(deviceName);
 	fields.name_is_complete = 1;
 
-	/* Example 16-bit service UUID (0xFFF0) to indicate a custom service */
+	/* Include the custom 16-bit service UUID (0xFFF0). */
 	uint16_t serviceUuid = 0xFFF0;
 	ble_uuid16_t uuid16 = {
 		.u = { .type = BLE_UUID_TYPE_16 },
@@ -130,11 +126,11 @@ static void startAdvertising(void) {
 	advParams.disc_mode = BLE_GAP_DISC_MODE_GEN;  /* general discovery mode */
 
 	rc = ble_gap_adv_start(ownAddrType,
-			       NULL,
-			       BLE_HS_FOREVER,
-			       &advParams,
-			       gapEventHandler,
-			       NULL);
+	                       NULL,
+	                       BLE_HS_FOREVER,
+	                       &advParams,
+	                       gapEventHandler,
+	                       NULL);
 	if (rc != 0) {
 		ESP_LOGE(TAG, "Error starting advertising, rc=%d", rc);
 	} else {
@@ -142,48 +138,35 @@ static void startAdvertising(void) {
 	}
 }
 
-/**
- * @brief NimBLE sync callback.
- *
- * Called by the BLE host when it is fully initialized and ready. At this point
- * the device address is known and we can safely start advertising.
- */
-static void onSync(void) {
+/* --- NimBLE lifecycle ----------------------------------------------------- */
+
+static void onSync(void)
+{
 	int rc = ble_hs_id_infer_auto(0, &ownAddrType);
 	if (rc != 0) {
 		ESP_LOGE(TAG, "Error determining address type, rc=%d", rc);
 		return;
 	}
 
-	/* Publish our local name as WM-SHEARS */
 	ble_svc_gap_device_name_set(deviceName);
 
-	/* Start advertising immediately; app can set LED to "blinking" on init */
 	startAdvertising();
 }
 
-/**
- * @brief NimBLE host FreeRTOS task entry point.
- */
-static void hostTask(void *param) {
+static void hostTask(void *param)
+{
 	(void)param;
 	nimble_port_run();
 	nimble_port_freertos_deinit();
 }
 
-/**
- * @brief Public entry point: initialize BLE stack and begin advertising.
- *
- * This wraps:
- *  - NVS init (required by BLE controller)
- *  - NimBLE init
- *  - GAP/GATT service init
- *  - Launches NimBLE host task
- */
-void shearsBleInit(shearsBleConnCallback_t cb) {
+/* --- Public API ----------------------------------------------------------- */
+
+void shearsBleInit(shearsBleConnCallback_t cb)
+{
 	connCallback = cb;
 
-	/* Initialize NVS storage used by the BLE controller */
+	/* NVS is required by the controller; handle the "no free pages" case. */
 	esp_err_t ret = nvs_flash_init();
 	if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
 		ESP_ERROR_CHECK(nvs_flash_erase());
@@ -191,21 +174,16 @@ void shearsBleInit(shearsBleConnCallback_t cb) {
 	}
 	ESP_ERROR_CHECK(ret);
 
-	/* Initialize NimBLE stack */
 	nimble_port_init();
 
-	/* Register host callbacks */
 	ble_hs_cfg.sync_cb = onSync;
 	ble_hs_cfg.reset_cb = NULL;
 
-	/* Initialize standard GAP/GATT services */
 	ble_svc_gap_init();
 	ble_svc_gatt_init();
 
-	/* Register custom log transfer service */
 	log_transfer_server_init();
 
-	/* Start the NimBLE host task */
 	nimble_port_freertos_init(hostTask);
 
 	ESP_LOGI(TAG, "Shears BLE initialized");

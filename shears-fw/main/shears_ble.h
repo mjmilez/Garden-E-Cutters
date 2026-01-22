@@ -1,30 +1,21 @@
-/**
- * @file shears_ble.h
- * @brief BLE peripheral (shears) interface.
+/*
+ * shears_ble.h
  *
- * This module:
- *  - Initializes NimBLE for the shears node
- *  - Advertises under the name "WM-SHEARS"
- *  - Exposes a callback for connection state changes
+ * BLE peripheral interface for the shears node.
  *
- * It does NOT touch any LEDs directly. The app layer decides what
- * to do when the connection state changes (e.g. call shearsLed*).
+ * Provides a small public API for initializing the BLE stack and reporting
+ * connection state changes to the application. LED behavior stays in the
+ * application layer (e.g. app_main driving shearsLed*()).
  */
 
 #pragma once
 
 #include <stdbool.h>
 
-/**
- * @brief Callback type used by the app when BLE connection changes.
- *
- * @param connected true when a central is connected, false when disconnected.
- */
+/* --- Public API ----------------------------------------------------------- */
+
+/* Application callback for BLE connection state changes. */
 typedef void (*shearsBleConnCallback_t)(bool connected);
 
-/**
- * @brief Initialize BLE peripheral stack and start advertising.
- *
- * @param cb Callback invoked whenever a central connects or disconnects.
- */
+/* Initializes BLE peripheral mode and starts advertising. */
 void shearsBleInit(shearsBleConnCallback_t cb);
