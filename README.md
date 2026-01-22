@@ -1,15 +1,6 @@
 # Garden E-Cutters Firmware (BLE-v1)
 
-This repository contains the ESP32 firmware for the **shears** and the **base station** used in the Garden E-Cutters system. Both devices run ESP-IDF with the NimBLE stack and follow a modular design that separates BLE, LED indication, and (on the shears) GPS logging and file-transfer behavior.
-
-BLE-v1 establishes a stable, reproducible communication link that supports:
-
-- automatic scanning and reconnection  
-- a custom BLE service (`0xFFF0`)  
-- a complete log file transfer protocol between devices  
-- clean subsystem boundaries  
-
-The immediate next step is to hook this firmware into the existing web interface so the base can serve the collected data over HTTP, in parallel with continuing work on telemetry packets, CRC, and queueing.
+This repository contains the ESP32 firmware for the **shears** and the **base station** used in the Garden E-Cutters system.
 
 ---
 
@@ -20,7 +11,7 @@ The firmware is split into two independent ESP32 applications:
 - **shears-fw** – operates as a BLE peripheral  
 - **base-fw** – operates as a BLE central  
 
-Each lives in its own folder, builds independently, and exposes its own README.
+Each lives in its own folder, builds independently, and has its own README.
 
 ---
 
@@ -108,8 +99,6 @@ The base acts as the BLE central device. It handles scanning, discovery, connect
   - a local SPIFFS file (default: `/spiffs/gps_points.csv`), or
   - an in-RAM buffer if the filesystem is not available
 - Handles chunk ordering and aggregation
-
-This is the bridge between “BLE world” and “filesystem world” on the base. The web server will read from the same data that this module writes.
 
 ---
 
@@ -216,83 +205,16 @@ Replace `<port>` with your actual serial device (for example `COM5` or `/dev/tty
 
 ---
 
-# Next Steps
+# Next steps
 
-The BLE log-transfer pipeline is in place. The next work is to wire this into the web server and UI so the data on the base can be viewed and interacted with, while in parallel evolving the data transmission protocol itself.
+BLE log transfer works end-to-end. The next phase is wiring it into the base’s web server so the data can be viewed and interacted with.
 
-### 1. Connect base firmware to the web server
+- Hook the base web server up to the downloaded GPS log  
 
-- Decide on the data source:
-  - read directly from `/spiffs/gps_points.csv`, or
-  - maintain an in-memory representation (parsed from CSV) that the web server can expose.
-- Define a clean interface between:
-  - the log transfer client (which writes the file), and
-  - the HTTP/web server layer (which serves it).
+- Update the web UI to fetch and display the data  
+  - basic table or simple map/plot  
+  - button to refresh or re-pull the log
 
-At a high level, the base should:
-
-1. Pull the log from the shears over BLE (already implemented).  
-2. Store or parse it on the base (SPIFFS file or RAM model).  
-3. Expose the data over HTTP to the existing web frontend.
-
-### 2. Define HTTP endpoints for log data
-
-Add one or more endpoints to the existing base web server, for example:
-
-- `GET /api/gps/log/raw`  
-  returns the raw CSV file
-
-- `GET /api/gps/log`  
-  returns parsed data as JSON
-
-- `GET /api/gps/latest`  
-  returns only the latest point or a small window
-
-### 3. Hook the web UI to these endpoints
-
-In the existing web interface:
-
-- call the new API endpoints to fetch log data  
-- display:
-  - a basic table of points, or
-  - a minimal map/plot-style view
-- add a “Refresh log” or “Pull from shears” action that:
-  - triggers a new log transfer, or
-  - at least reloads the data the firmware has already pulled
-
-### 4. Optional: trigger log pulls from the web UI
-
-Once the basic data path is working:
-
-- add a HTTP endpoint that instructs the firmware to:
-  - request a fresh log from the shears
-  - wait until the transfer completes
-  - then return success/failure to the frontend
-- integrate that into the UI as a “Sync from shears” button
-
-This closes the loop: browser → web server → BLE → shears → BLE → base → browser.
-
-### 5. Evolve the data protocol (CRC + queueing + telemetry)
-
-In parallel with web work, the underlying transmission protocol can be made more robust:
-
-- add per-entry or per-chunk CRCs for integrity
-- implement a queue of entries on the shears and delete entries only after ACK from the base
-- define a compact telemetry packet and characteristic for real-time streaming
-- give the base tools to distinguish “bulk log transfer” from “live telemetry”
-
-These changes build on the same structure but can be layered in as the web path stabilizes.
-
----
-
-# Summary
-
-BLE-v1 now provides:
-
-- a stable BLE central/peripheral pair  
-- a custom GATT service for file transfer  
-- a GPS logging subsystem on the shears  
-- a file-transfer client on the base  
-- SPIFFS integration and status LEDs on both devices  
-
-The next concrete milestone is to surface that data through the base web server and wire it into the existing web interface, while incrementally improving the transfer protocol with CRC, queueing, and later telemetry.
+Longer-term to-dos:
+- add CRCs / better error handling to the transfer protocol  
+- ACK + delete entries on the shears side
