@@ -1,0 +1,19 @@
+# ESP-IDF build outputs
+build/
+sdkconfig
+sdkconfig.old
+CMakeCache.txt
+cmake-build-*/
+*.bin
+*.elf
+*.log
+
+# Editor files
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# Python venv or tool cache
+venv/
+__pycache__/
