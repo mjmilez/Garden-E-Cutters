@@ -171,13 +171,34 @@ static void printCsvFile(void)
 		return;
 	}
 
-	ESP_LOGI(TAG, "---- GPS Data Points ----");
-	char line[256];
+	#define MAX_LINES 5
+	char lines[MAX_LINES][256];
+	int lineNums[MAX_LINES];
 
-	while (fgets(line, sizeof(line), f)) {
-		printf("%s", line);
+	int totalLines = 0;
+	char buffer[256];
+
+	while (fgets(buffer, sizeof(buffer), f)) {
+		int idx = totalLines % MAX_LINES;
+
+		strncpy(lines[idx], buffer, sizeof(lines[idx]) - 1);
+		lines[idx][sizeof(lines[idx]) - 1] = '\0';
+		lineNums[idx] = totalLines + 1;
+
+		totalLines++;
 	}
+
 	fclose(f);
+
+	ESP_LOGI(TAG, "---- Newest GPS Data Points ----");
+
+	int linesToPrint = (totalLines < MAX_LINES) ? totalLines : MAX_LINES;
+	int start = (totalLines >= MAX_LINES) ? (totalLines % MAX_LINES) : 0;
+
+	for (int i = 0; i < linesToPrint; i++) {
+		int idx = (start + i) % MAX_LINES;
+		printf("%d: %s", lineNums[idx], lines[idx]);
+	}
 }
 
 
