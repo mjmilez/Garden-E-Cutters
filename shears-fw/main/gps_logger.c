@@ -5,7 +5,7 @@
  *
  * Responsibilities:
  *   - mount SPIFFS and ensure gps_points.csv exists with a header
- *   - configure UART2 for 9600 baud NMEA input
+ *   - configure UART2 for 115200 baud NMEA input
  *   - keep the most recent full NMEA sentence in latestNmea[]
  *   - accept save requests from a GPIO button or gpsLoggerRequestSave()
  *   - on save, parse $GPGGA and append one CSV row
@@ -51,7 +51,7 @@ static void initSpiffs(void);
 static double nmeaToDecimal(const char *nmea_val, char hemisphere);
 static void storeGgaCsv(const char *nmea);
 static void printCsvFile(void);
-
+static void formatUtcTime(const char *nmeaUtc, char *out, size_t outLen);
 
 static void IRAM_ATTR buttonIsrHandler(void *arg)
 {
@@ -111,7 +111,7 @@ static double nmeaToDecimal(const char *nmea_val, char hemisphere)
 
 static void storeGgaCsv(const char *nmea)
 {
-	if (strncmp(nmea, "$GPGGA,", 7) != 0) {
+	if (strncmp(nmea, "$GNGGA,", 7) != 0) {
 		return;
 	}
 
@@ -128,7 +128,7 @@ static void storeGgaCsv(const char *nmea)
 	}
 
 	if (i < 12) {
-		ESP_LOGW(TAG, "GPGGA sentence too short, i=%d", i);
+		ESP_LOGW(TAG, "GNGGA sentence too short, i=%d", i);
 		return;
 	}
 
@@ -172,35 +172,101 @@ static void printCsvFile(void)
 	}
 
 	#define MAX_LINES 5
-	char lines[MAX_LINES][256];
+	#define LINE_BUF  256
+
+	char header[LINE_BUF] = {0};
+
+	char lines[MAX_LINES][LINE_BUF];
 	int lineNums[MAX_LINES];
 
-	int totalLines = 0;
-	char buffer[256];
+	int dataLinesSeen = 0;
+	char buffer[LINE_BUF];
 
+	/* Read header */
+	if (!fgets(header, sizeof(header), f)) {
+		fclose(f);
+		ESP_LOGW(TAG, "CSV file is empty");
+		return;
+	}
+
+	/* Read data rows, keep newest MAX_LINES */
 	while (fgets(buffer, sizeof(buffer), f)) {
-		int idx = totalLines % MAX_LINES;
+		int idx = dataLinesSeen % MAX_LINES;
 
 		strncpy(lines[idx], buffer, sizeof(lines[idx]) - 1);
 		lines[idx][sizeof(lines[idx]) - 1] = '\0';
-		lineNums[idx] = totalLines + 1;
 
-		totalLines++;
+		/* Header is line 1, first data row is line 2 */
+		lineNums[idx] = dataLinesSeen + 2;
+
+		dataLinesSeen++;
 	}
 
 	fclose(f);
 
 	ESP_LOGI(TAG, "---- Newest GPS Data Points ----");
 
-	int linesToPrint = (totalLines < MAX_LINES) ? totalLines : MAX_LINES;
-	int start = (totalLines >= MAX_LINES) ? (totalLines % MAX_LINES) : 0;
+	if (dataLinesSeen == 0) {
+		ESP_LOGI(TAG, "(no data rows yet)");
+		return;
+	}
+
+	/* Table header */
+	printf("\n");
+	printf("line | %-11s | %-11s | %-12s | %-3s | %-4s | %-4s | %-8s | %-11s\n",
+	       "utc_time", "latitude", "longitude", "fix", "sats", "hdop", "alt(m)", "geoid(m)");
+	printf("-----+-------------+-------------+--------------+-----+------+------+-"
+	       "----------+------------\n");
+
+	int linesToPrint = (dataLinesSeen < MAX_LINES) ? dataLinesSeen : MAX_LINES;
+	int start = (dataLinesSeen >= MAX_LINES) ? (dataLinesSeen % MAX_LINES) : 0;
 
 	for (int i = 0; i < linesToPrint; i++) {
 		int idx = (start + i) % MAX_LINES;
-		printf("%d: %s", lineNums[idx], lines[idx]);
-	}
-}
 
+		char row[LINE_BUF];
+		strncpy(row, lines[idx], sizeof(row) - 1);
+		row[sizeof(row) - 1] = '\0';
+
+		/* Strip trailing newline */
+		size_t len = strlen(row);
+		if (len > 0 && row[len - 1] == '\n') {
+			row[len - 1] = '\0';
+		}
+
+		char *tokens[8] = {0};
+		int t = 0;
+
+		char *tok = strtok(row, ",");
+		while (tok != NULL && t < 8) {
+			tokens[t++] = tok;
+			tok = strtok(NULL, ",");
+		}
+
+		if (t < 8) {
+			printf("%4d | (malformed) %s\n", lineNums[idx], lines[idx]);
+			continue;
+		}
+
+		/* Format UTC time (hhmmss.ss -> hh:mm:ss.ss) */
+		char timeFmt[16];
+		formatUtcTime(tokens[0], timeFmt, sizeof(timeFmt));
+
+		printf("%4d | %-10s | %11s | %12s | %3s | %4s | %4s | %8s | %11s\n",
+		       lineNums[idx],
+		       timeFmt,
+		       tokens[1], /* latitude */
+		       tokens[2], /* longitude */
+		       tokens[3], /* fix_quality */
+		       tokens[4], /* num_satellites */
+		       tokens[5], /* hdop */
+		       tokens[6], /* altitude */
+		       tokens[7]  /* geoid_height */
+		);
+	}
+
+	printf("\n");
+}
 
 static void initSpiffs(void)
 {
@@ -266,7 +332,7 @@ void gpsLoggerInit(void)
 	initSpiffs();
 
 	uart_config_t uart_config = {
-		.baud_rate = 38400,
+		.baud_rate = 115200,
 		.data_bits = UART_DATA_8_BITS,
 		.parity    = UART_PARITY_DISABLE,
 		.stop_bits = UART_STOP_BITS_1,
@@ -281,7 +347,7 @@ void gpsLoggerInit(void)
 	             UART_PIN_NO_CHANGE);
 	uart_driver_install(GPS_UART_NUM, GPS_BUF_SIZE * 2, 0, 0, NULL, 0);
 
-	ESP_LOGI(TAG, "UART2 configured for GPS at 38400 baud");
+	ESP_LOGI(TAG, "UART2 configured for GPS at 115200 baud");
 
 	gpio_config_t io_conf = {
 		.pin_bit_mask = 1ULL << GPS_BUTTON_PIN,
@@ -313,4 +379,21 @@ void gpsLoggerRequestSave(void)
 void gpsLoggerPrintCsv(void)
 {
 	printCsvFile();
+}
+
+static void formatUtcTime(const char *nmeaUtc, char *out, size_t outLen)
+{
+	if (!nmeaUtc || strlen(nmeaUtc) < 6) {
+		snprintf(out, outLen, "--:--:--");
+		return;
+	}
+
+	char hh[3] = { nmeaUtc[0], nmeaUtc[1], '\0' };
+	char mm[3] = { nmeaUtc[2], nmeaUtc[3], '\0' };
+	char ss[16];
+
+	/* Copy seconds + fractional part if present */
+	snprintf(ss, sizeof(ss), "%s", nmeaUtc + 4);
+
+	snprintf(out, outLen, "%s:%s:%s", hh, mm, ss);
 }
