@@ -245,7 +245,8 @@ static void saveTask(void *arg)
 			ESP_LOGI(TAG, "Save requested; latest NMEA: %s", latestNmea);
 			storeGgaCsv(latestNmea);
 
-			/* Debug output for transfer verification. */
+			memset(latestNmea, 0, sizeof(latestNmea));
+
 			printCsvFile();
 		}
 
