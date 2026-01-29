@@ -13,6 +13,7 @@
 
 #include "gps_logger.h"
 
+#include <stdint.h>
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -22,12 +23,14 @@
 
 #include "esp_log.h"
 
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
 #include "esp_spiffs.h"
 #include "esp_err.h"
 
+#include "hal/gpio_types.h"
 #include "log_paths.h"
 
 #define GPS_UART_NUM   UART_NUM_2
@@ -44,7 +47,10 @@ static char latestNmea[GPS_BUF_SIZE];
 static volatile bool nmeaValid = false;
 
 static volatile bool saveRequestedFlag = false;
+
 static volatile bool clearRequestedFlag=false;
+static int64_t buttonPressTimeUs = 0;
+
 
 static void buttonIsrHandler(void *arg);
 static void uartReadTask(void *arg);
@@ -54,10 +60,31 @@ static double nmeaToDecimal(const char *nmea_val, char hemisphere);
 static void storeGgaCsv(const char *nmea);
 static void printCsvFile(void);
 static void formatUtcTime(const char *nmeaUtc, char *out, size_t outLen);
+static void clearCSV(void);
 
 static void IRAM_ATTR buttonIsrHandler(void *arg){
   (void)arg;
-  saveRequestedFlag = true;
+
+  int level=gpio_get_level(GPS_BUTTON_PIN);
+
+  //button is pressed
+  if(level==0){
+    buttonPressTimeUs=esp_timer_get_time();
+
+  }
+  else{
+    int64_t nowTime=esp_timer_get_time();
+    int64_t timeDiff= nowTime - buttonPressTimeUs;
+
+    //clear
+    if(timeDiff>2000000){
+      clearRequestedFlag=true;
+    }
+    //gps log
+    else{
+      saveRequestedFlag=true;
+    }
+  }
 }
 
 
@@ -108,6 +135,21 @@ static double nmeaToDecimal(const char *nmea_val, char hemisphere){
   return decimal;
 }
 
+static void clearCSV(void){
+  FILE* f=fopen(GPS_LOG_FILE_PATH, "w");
+  if(!f){
+    ESP_LOGE(TAG, "Could not open file to clear CSV");
+    return;
+  }
+  else{
+    fprintf(f,
+            "utc_time,latitude,longitude,fix_quality,"
+            "num_satellites,hdop,altitude,geoid_height\n");
+    fclose(f);
+    ESP_LOGW(TAG, "GPS CSV cleared");
+  }
+}
+
 static void storeGgaCsv(const char *nmea){
   if (strncmp(nmea, "$GNGGA,", 7) != 0) {
     return;
@@ -129,6 +171,7 @@ static void storeGgaCsv(const char *nmea){
     ESP_LOGW(TAG, "GNGGA sentence too short, i=%d", i);
     return;
   }
+
 
   const char *utc_time = tokens[1];
   double lat = nmeaToDecimal(tokens[2], tokens[3][0]);
@@ -322,16 +365,27 @@ static void saveTask(void *arg){
   (void)arg;
 
   while (1) {
-    if (saveRequestedFlag) {
+
+    if(clearRequestedFlag){
+      clearRequestedFlag=false;
+      clearCSV();
+      memset(latestNmea, 0, sizeof(latestNmea));
+      nmeaValid = false;
+    }
+
+
+    else if (saveRequestedFlag) {
       saveRequestedFlag = false;
 
       if (nmeaValid) {
         ESP_LOGI(TAG, "Save requested; latest NMEA: %s", latestNmea);
         storeGgaCsv(latestNmea);
         nmeaValid = false;
+        //clear buffer
         memset(latestNmea, 0, sizeof(latestNmea));
         printCsvFile();
-      } else {
+      } 
+      else {
         ESP_LOGW(TAG, "Save requested but no valid NMEA data available");
       }
     }
@@ -340,7 +394,7 @@ static void saveTask(void *arg){
   }
 }
 
-
+//main
 void gpsLoggerInit(void){
   // init the spiffs filesystem
   initSpiffs();
@@ -368,7 +422,7 @@ void gpsLoggerInit(void){
     .mode         = GPIO_MODE_INPUT,
     .pull_up_en   = 1,
     .pull_down_en = 0,
-    .intr_type    = GPIO_INTR_NEGEDGE
+    .intr_type    = GPIO_INTR_ANYEDGE
   };
 
   gpio_config(&io_conf);
@@ -381,22 +435,20 @@ void gpsLoggerInit(void){
   xTaskCreate(saveTask, "gps_save_task", 4096, NULL, 5, NULL);
 }
 
-void gpsLoggerRequestSave(void)
-{
+void gpsLoggerRequestSave(void){
   if (nmeaValid) {
     saveRequestedFlag = true;
-  } else {
+  } 
+  else {
     ESP_LOGW(TAG, "Save requested but no valid NMEA data available");
   }
 }
 
-void gpsLoggerPrintCsv(void)
-{
+void gpsLoggerPrintCsv(void){
   printCsvFile();
 }
 
-static void formatUtcTime(const char *nmeaUtc, char *out, size_t outLen)
-{
+static void formatUtcTime(const char *nmeaUtc, char *out, size_t outLen){
   if (!nmeaUtc || strlen(nmeaUtc) < 6) {
     snprintf(out, outLen, "--:--:--");
     return;
