@@ -14,6 +14,9 @@ cmake-build-*/
 *.swp
 .DS_Store
 
+#for matthew MAC
+shears-fw/.cache/
+
 # Python venv or tool cache
 venv/
 __pycache__/
