@@ -5,7 +5,7 @@
  *
  * Responsibilities:
  *   - mount SPIFFS and ensure gps_points.csv exists with a header
- *   - configure UART2 for 9600 baud NMEA input
+ *   - configure UART2 for 115200 baud NMEA input
  *   - keep the most recent full NMEA sentence in latestNmea[]
  *   - accept save requests from a GPIO button or gpsLoggerRequestSave()
  *   - on save, parse $GPGGA and append one CSV row
@@ -29,24 +29,21 @@
 
 #include "log_paths.h"
 
-/* UART configuration for GPS NMEA input. */
 #define GPS_UART_NUM   UART_NUM_2
 #define GPS_UART_RX    GPIO_NUM_16
 #define GPS_UART_TX    GPIO_NUM_17
 #define GPS_BUF_SIZE   512
 
-/* GPIO used for the "save GPS point" button. */
 #define GPS_BUTTON_PIN GPIO_NUM_23
 
 static const char *TAG = "gps_logger";
 
-/* Most recent complete NMEA sentence from the GPS receiver. */
 static char latestNmea[GPS_BUF_SIZE];
 
-/* Save request flag set by ISR or API and handled by saveTask(). */
+static volatile bool nmeaValid = false;
+
 static volatile bool saveRequestedFlag = false;
 
-/* Forward declarations. */
 static void buttonIsrHandler(void *arg);
 static void uartReadTask(void *arg);
 static void saveTask(void *arg);
@@ -54,19 +51,15 @@ static void initSpiffs(void);
 static double nmeaToDecimal(const char *nmea_val, char hemisphere);
 static void storeGgaCsv(const char *nmea);
 static void printCsvFile(void);
+static void formatUtcTime(const char *nmeaUtc, char *out, size_t outLen);
 
-/* --- Button ISR ----------------------------------------------------------- */
-
-/* ISR for the physical save button. */
 static void IRAM_ATTR buttonIsrHandler(void *arg)
 {
 	(void)arg;
 	saveRequestedFlag = true;
 }
 
-/* --- UART reader ---------------------------------------------------------- */
 
-/* Reads UART bytes and assembles complete NMEA lines into latestNmea[]. */
 static void uartReadTask(void *arg)
 {
 	(void)arg;
@@ -92,6 +85,7 @@ static void uartReadTask(void *arg)
 				if (c == '\n') {
 					nmea_buf[nmea_len] = '\0';
 					strncpy(latestNmea, nmea_buf, GPS_BUF_SIZE);
+					nmeaValid = true;
 					nmea_len = 0;
 				}
 			}
@@ -101,9 +95,6 @@ static void uartReadTask(void *arg)
 	}
 }
 
-/* --- NMEA parsing --------------------------------------------------------- */
-
-/* Converts NMEA coordinate format (ddmm.mmmm / dddmm.mmmm) to decimal degrees. */
 static double nmeaToDecimal(const char *nmea_val, char hemisphere)
 {
 	double val = atof(nmea_val);
@@ -118,10 +109,9 @@ static double nmeaToDecimal(const char *nmea_val, char hemisphere)
 	return decimal;
 }
 
-/* Parses a $GPGGA sentence and appends one CSV row to gps_points.csv. */
 static void storeGgaCsv(const char *nmea)
 {
-	if (strncmp(nmea, "$GPGGA,", 7) != 0) {
+	if (strncmp(nmea, "$GNGGA,", 7) != 0) {
 		return;
 	}
 
@@ -138,17 +128,17 @@ static void storeGgaCsv(const char *nmea)
 	}
 
 	if (i < 12) {
-		ESP_LOGW(TAG, "GPGGA sentence too short, i=%d", i);
+		ESP_LOGW(TAG, "GNGGA sentence too short, i=%d", i);
 		return;
 	}
 
 	const char *utc_time = tokens[1];
-	double lat          = nmeaToDecimal(tokens[2], tokens[3][0]);
-	double lon          = nmeaToDecimal(tokens[4], tokens[5][0]);
-	int    fix          = atoi(tokens[6]);
-	int    num_sats     = atoi(tokens[7]);
-	double hdop         = atof(tokens[8]);
-	double altitude     = atof(tokens[9]);
+	double lat = nmeaToDecimal(tokens[2], tokens[3][0]);
+	double lon = nmeaToDecimal(tokens[4], tokens[5][0]);
+	int fix = atoi(tokens[6]);
+	int num_sats = atoi(tokens[7]);
+	double hdop = atof(tokens[8]);
+	double altitude = atof(tokens[9]);
 	double geoid_height = atof(tokens[11]);
 
 	FILE *f = fopen(GPS_LOG_FILE_PATH, "a");
@@ -173,9 +163,6 @@ static void storeGgaCsv(const char *nmea)
 	         utc_time, lat, lon);
 }
 
-/* --- CSV helpers ---------------------------------------------------------- */
-
-/* Prints the CSV file contents to the log for quick inspection. */
 static void printCsvFile(void)
 {
 	FILE *f = fopen(GPS_LOG_FILE_PATH, "r");
@@ -184,18 +171,103 @@ static void printCsvFile(void)
 		return;
 	}
 
-	ESP_LOGI(TAG, "---- GPS Data Points ----");
-	char line[256];
+	#define MAX_LINES 5
+	#define LINE_BUF  256
 
-	while (fgets(line, sizeof(line), f)) {
-		printf("%s", line);
+	char header[LINE_BUF] = {0};
+
+	char lines[MAX_LINES][LINE_BUF];
+	int lineNums[MAX_LINES];
+
+	int dataLinesSeen = 0;
+	char buffer[LINE_BUF];
+
+	/* Read header */
+	if (!fgets(header, sizeof(header), f)) {
+		fclose(f);
+		ESP_LOGW(TAG, "CSV file is empty");
+		return;
 	}
+
+	/* Read data rows, keep newest MAX_LINES */
+	while (fgets(buffer, sizeof(buffer), f)) {
+		int idx = dataLinesSeen % MAX_LINES;
+
+		strncpy(lines[idx], buffer, sizeof(lines[idx]) - 1);
+		lines[idx][sizeof(lines[idx]) - 1] = '\0';
+
+		/* Header is line 1, first data row is line 2 */
+		lineNums[idx] = dataLinesSeen + 2;
+
+		dataLinesSeen++;
+	}
+
 	fclose(f);
+
+	ESP_LOGI(TAG, "---- Newest GPS Data Points ----");
+
+	if (dataLinesSeen == 0) {
+		ESP_LOGI(TAG, "(no data rows yet)");
+		return;
+	}
+
+	/* Table header */
+	printf("\n");
+	printf("line | %-11s | %-11s | %-12s | %-3s | %-4s | %-4s | %-8s | %-11s\n",
+	       "utc_time", "latitude", "longitude", "fix", "sats", "hdop", "alt(m)", "geoid(m)");
+	printf("-----+-------------+-------------+--------------+-----+------+------+-"
+	       "----------+------------\n");
+
+	int linesToPrint = (dataLinesSeen < MAX_LINES) ? dataLinesSeen : MAX_LINES;
+	int start = (dataLinesSeen >= MAX_LINES) ? (dataLinesSeen % MAX_LINES) : 0;
+
+	for (int i = 0; i < linesToPrint; i++) {
+		int idx = (start + i) % MAX_LINES;
+
+		char row[LINE_BUF];
+		strncpy(row, lines[idx], sizeof(row) - 1);
+		row[sizeof(row) - 1] = '\0';
+
+		/* Strip trailing newline */
+		size_t len = strlen(row);
+		if (len > 0 && row[len - 1] == '\n') {
+			row[len - 1] = '\0';
+		}
+
+		char *tokens[8] = {0};
+		int t = 0;
+
+		char *tok = strtok(row, ",");
+		while (tok != NULL && t < 8) {
+			tokens[t++] = tok;
+			tok = strtok(NULL, ",");
+		}
+
+		if (t < 8) {
+			printf("%4d | (malformed) %s\n", lineNums[idx], lines[idx]);
+			continue;
+		}
+
+		/* Format UTC time (hhmmss.ss -> hh:mm:ss.ss) */
+		char timeFmt[16];
+		formatUtcTime(tokens[0], timeFmt, sizeof(timeFmt));
+
+		printf("%4d | %-10s | %11s | %12s | %3s | %4s | %4s | %8s | %11s\n",
+		       lineNums[idx],
+		       timeFmt,
+		       tokens[1], /* latitude */
+		       tokens[2], /* longitude */
+		       tokens[3], /* fix_quality */
+		       tokens[4], /* num_satellites */
+		       tokens[5], /* hdop */
+		       tokens[6], /* altitude */
+		       tokens[7]  /* geoid_height */
+		);
+	}
+
+	printf("\n");
 }
 
-/* --- SPIFFS --------------------------------------------------------------- */
-
-/* Mounts SPIFFS and ensures gps_points.csv exists with a header row. */
 static void initSpiffs(void)
 {
 	esp_vfs_spiffs_conf_t conf = {
@@ -231,9 +303,6 @@ static void initSpiffs(void)
 	}
 }
 
-/* --- Save handler --------------------------------------------------------- */
-
-/* Handles save requests and appends a CSV entry from latestNmea[]. */
 static void saveTask(void *arg)
 {
 	(void)arg;
@@ -242,27 +311,27 @@ static void saveTask(void *arg)
 		if (saveRequestedFlag) {
 			saveRequestedFlag = false;
 
-			ESP_LOGI(TAG, "Save requested; latest NMEA: %s", latestNmea);
-			storeGgaCsv(latestNmea);
-
-			memset(latestNmea, 0, sizeof(latestNmea));
-
-			printCsvFile();
-		}
+			if (nmeaValid) {
+				ESP_LOGI(TAG, "Save requested; latest NMEA: %s", latestNmea);
+				storeGgaCsv(latestNmea);
+				nmeaValid = false;
+                        memset(latestNmea, 0, sizeof(latestNmea));
+                        printCsvFile();
+                        } else {
+                                ESP_LOGW(TAG, "Save requested but no valid NMEA data available");
+                        }
 
 		vTaskDelay(pdMS_TO_TICKS(10));
 	}
 }
 
-/* --- Public API ----------------------------------------------------------- */
 
 void gpsLoggerInit(void)
 {
 	initSpiffs();
 
-	/* UART2: 9600 baud, 8N1, no flow control. */
 	uart_config_t uart_config = {
-		.baud_rate = 9600,
+		.baud_rate = 115200,
 		.data_bits = UART_DATA_8_BITS,
 		.parity    = UART_PARITY_DISABLE,
 		.stop_bits = UART_STOP_BITS_1,
@@ -277,9 +346,8 @@ void gpsLoggerInit(void)
 	             UART_PIN_NO_CHANGE);
 	uart_driver_install(GPS_UART_NUM, GPS_BUF_SIZE * 2, 0, 0, NULL, 0);
 
-	ESP_LOGI(TAG, "UART2 configured for GPS at 9600 baud");
+	ESP_LOGI(TAG, "UART2 configured for GPS at 115200 baud");
 
-	/* Button input with pull-up and falling-edge interrupt. */
 	gpio_config_t io_conf = {
 		.pin_bit_mask = 1ULL << GPS_BUTTON_PIN,
 		.mode         = GPIO_MODE_INPUT,
@@ -300,10 +368,31 @@ void gpsLoggerInit(void)
 
 void gpsLoggerRequestSave(void)
 {
-	saveRequestedFlag = true;
+	if (nmeaValid) {
+		saveRequestedFlag = true;
+	} else {
+		ESP_LOGW(TAG, "Save requested but no valid NMEA data available");
+	}
 }
 
 void gpsLoggerPrintCsv(void)
 {
 	printCsvFile();
+}
+
+static void formatUtcTime(const char *nmeaUtc, char *out, size_t outLen)
+{
+	if (!nmeaUtc || strlen(nmeaUtc) < 6) {
+		snprintf(out, outLen, "--:--:--");
+		return;
+	}
+
+	char hh[3] = { nmeaUtc[0], nmeaUtc[1], '\0' };
+	char mm[3] = { nmeaUtc[2], nmeaUtc[3], '\0' };
+	char ss[16];
+
+	/* Copy seconds + fractional part if present */
+	snprintf(ss, sizeof(ss), "%s", nmeaUtc + 4);
+
+	snprintf(out, outLen, "%s:%s:%s", hh, mm, ss);
 }
