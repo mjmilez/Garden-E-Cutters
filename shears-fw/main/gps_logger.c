@@ -51,6 +51,8 @@ static volatile bool saveRequestedFlag = false;
 static volatile bool clearRequestedFlag=false;
 static int64_t buttonPressTimeUs = 0;
 
+static volatile bool captureNextGGA=false;
+
 
 static void buttonIsrHandler(void *arg);
 static void uartReadTask(void *arg);
@@ -82,7 +84,8 @@ static void IRAM_ATTR buttonIsrHandler(void *arg){
     }
     //gps log
     else{
-      saveRequestedFlag=true;
+      // saveRequestedFlag=true;
+      captureNextGGA=true;
     }
   }
 }
@@ -111,10 +114,21 @@ static void uartReadTask(void *arg){
 
         if (c == '\n') {
           nmea_buf[nmea_len] = '\0';
-          strncpy(latestNmea, nmea_buf, GPS_BUF_SIZE);
-          nmeaValid = true;
-          nmea_len = 0;
-        }
+
+          // if short-press requested a capture, check if this is GGA
+          if (captureNextGGA && strncmp(nmea_buf, "$GNGGA,", 7) == 0) {
+            strncpy(latestNmea, nmea_buf, GPS_BUF_SIZE);
+            nmeaValid = true;
+
+            // disarm the capture and request save
+            captureNextGGA = false;
+            saveRequestedFlag = true;
+          }
+
+    nmea_len = 0;
+}
+
+
       }
     }
 
@@ -238,7 +252,7 @@ static void printCsvFile(void){
 
     //header line is line 1 
     //data line is after
-    lineNums[idx] = dataLinesSeen + 2;
+    lineNums[idx] = dataLinesSeen + 1;
 
     dataLinesSeen++;
   }
