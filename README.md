@@ -218,3 +218,6 @@ BLE log transfer works end-to-end. The next phase is wiring it into the base’s
 Longer-term to-dos:
 - add CRCs / better error handling to the transfer protocol  
 - ACK + delete entries on the shears side
+
+# Bugs
+- no known bugs at this moment
