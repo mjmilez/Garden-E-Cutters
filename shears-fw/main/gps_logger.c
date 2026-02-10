@@ -20,6 +20,7 @@
 
 #include "driver/uart.h"
 #include "driver/gpio.h"
+#include "driver/ledc.h"
 
 #include "esp_log.h"
 
@@ -52,6 +53,13 @@
 #define LED_BLINK_ON_MS       200
 #define LED_BLINK_OFF_MS      200
 
+#define PIEZO_LEDC_TIMER      LEDC_TIMER_0
+#define PIEZO_LEDC_CHANNEL    LEDC_CHANNEL_0
+#define PIEZO_LEDC_MODE       LEDC_LOW_SPEED_MODE
+#define PIEZO_LEDC_RES        LEDC_TIMER_8_BIT
+#define PIEZO_LEDC_DUTY       128
+#define PIEZO_LEDC_FREQ_HZ    4000
+
 static const char *TAG = "gps_logger";
 
 static char latestNmea[GPS_BUF_SIZE];
@@ -81,6 +89,8 @@ static void formatUtcTime(const char *nmeaUtc, char *out, size_t outLen);
 static void clearCSV(void);
 static void requestCutFeedback(void);
 static void beepPattern(int count);
+static void piezoInit(void);
+static void piezoSet(bool enable);
 
 static void IRAM_ATTR buttonIsrHandler(void *arg){
   gpio_num_t pin = (gpio_num_t)(intptr_t)arg;
@@ -255,11 +265,40 @@ static void requestCutFeedback(void){
 //this is for piezo!
 static void beepPattern(int count){
   for (int i = 0; i < count; i++) {
-    gpio_set_level(PIEZO_PIN, 1);
+    piezoSet(true);
     vTaskDelay(pdMS_TO_TICKS(BEEP_ON_MS));
-    gpio_set_level(PIEZO_PIN, 0);
+    piezoSet(false);
     vTaskDelay(pdMS_TO_TICKS(BEEP_OFF_MS));
   }
+}
+
+static void piezoInit(void){
+  ledc_timer_config_t timer_conf = {
+    .speed_mode       = PIEZO_LEDC_MODE,
+    .timer_num        = PIEZO_LEDC_TIMER,
+    .duty_resolution  = PIEZO_LEDC_RES,
+    .freq_hz          = PIEZO_LEDC_FREQ_HZ,
+    .clk_cfg          = LEDC_AUTO_CLK
+  };
+  ledc_timer_config(&timer_conf);
+
+  ledc_channel_config_t channel_conf = {
+    .gpio_num   = PIEZO_PIN,
+    .speed_mode = PIEZO_LEDC_MODE,
+    .channel    = PIEZO_LEDC_CHANNEL,
+    .intr_type  = LEDC_INTR_DISABLE,
+    .timer_sel  = PIEZO_LEDC_TIMER,
+    .duty       = 0,
+    .hpoint     = 0
+  };
+  ledc_channel_config(&channel_conf);
+}
+
+static void piezoSet(bool enable){
+  ledc_set_duty(PIEZO_LEDC_MODE,
+                PIEZO_LEDC_CHANNEL,
+                enable ? PIEZO_LEDC_DUTY : 0);
+  ledc_update_duty(PIEZO_LEDC_MODE, PIEZO_LEDC_CHANNEL);
 }
 
 static void printCsvFile(void){
@@ -518,8 +557,7 @@ void gpsLoggerInit(void){
   gpio_config(&io_conf);
 
   gpio_config_t out_conf = {
-    .pin_bit_mask = (1ULL << LED_STATUS_PIN) |
-                    (1ULL << PIEZO_PIN),
+    .pin_bit_mask = (1ULL << LED_STATUS_PIN),
     .mode         = GPIO_MODE_OUTPUT,
     .pull_up_en   = 0,
     .pull_down_en = 0,
@@ -527,7 +565,8 @@ void gpsLoggerInit(void){
   };
   gpio_config(&out_conf);
   gpio_set_level(LED_STATUS_PIN, 1);
-  gpio_set_level(PIEZO_PIN, 0);
+
+  piezoInit();
 
   gpio_install_isr_service(0);
   gpio_isr_handler_add(GPS_BUTTON_PIN, buttonIsrHandler, (void *)(intptr_t)GPS_BUTTON_PIN);
