@@ -5,6 +5,7 @@
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
+#include "base_led.h"
 
 static atomic_int g_running = 1;
 
