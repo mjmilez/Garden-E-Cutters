@@ -1,0 +1,191 @@
+ERC report (2026-02-16T13:00:15-0500, Encoding UTF8)
+
+***** Sheet /
+[global_label_dangling]: Global label not connected anywhere else in the schematic
+    ; warning
+    @(2550 mils, 3250 mils): Global Label 'TX1'
+[unannotated]: Item not annotated: Blue(LED)?
+    ; error
+    @(3650 mils, 1950 mils): Symbol Blue(LED) [LED]
+[pin_not_connected]: Pin not connected
+    ; error
+    @(3000 mils, 3350 mils): Symbol RTK_Top_Left Pin 2 [Pin_2, Passive, Line]
+[lib_symbol_mismatch]: Symbol 'Conn_01x08_Pin' doesn't match copy in library 'Connector'
+    ; warning
+    @(2800 mils, 3550 mils): Symbol RTK_Top_Left [Conn_01x08_Pin]
+[pin_not_connected]: Pin not connected
+    ; error
+    @(3000 mils, 3450 mils): Symbol RTK_Top_Left Pin 3 [Pin_3, Passive, Line]
+[pin_not_connected]: Pin not connected
+    ; error
+    @(3000 mils, 3550 mils): Symbol RTK_Top_Left Pin 4 [Pin_4, Passive, Line]
+[pin_not_connected]: Pin not connected
+    ; error
+    @(3000 mils, 3650 mils): Symbol RTK_Top_Left Pin 5 [Pin_5, Passive, Line]
+[pin_not_connected]: Pin not connected
+    ; error
+    @(3000 mils, 3750 mils): Symbol RTK_Top_Left Pin 6 [Pin_6, Passive, Line]
+[pin_not_connected]: Pin not connected
+    ; error
+    @(4250 mils, 2250 mils): Symbol ESP_Left Pin 1 [Pin_1, Passive, Line]
+[pin_not_connected]: Pin not connected
+    ; error
+    @(4250 mils, 2350 mils): Symbol ESP_Left Pin 2 [Pin_2, Passive, Line]
+[pin_not_connected]: Pin not connected
+    ; error
+    @(3000 mils, 3850 mils): Symbol RTK_Top_Left Pin 7 [Pin_7, Passive, Line]
+[pin_not_connected]: Pin not connected
+    ; error
+    @(4250 mils, 2450 mils): Symbol ESP_Left Pin 3 [Pin_3, Passive, Line]
+[pin_not_connected]: Pin not connected
+    ; error
+    @(4250 mils, 2550 mils): Symbol ESP_Left Pin 4 [Pin_4, Passive, Line]
+[pin_not_connected]: Pin not connected
+    ; error
+    @(3000 mils, 3950 mils): Symbol RTK_Top_Left Pin 8 [Pin_8, Passive, Line]
+[pin_not_connected]: Pin not connected
+    ; error
+    @(4250 mils, 2850 mils): Symbol ESP_Left Pin 7 [Pin_7, Passive, Line]
+[pin_not_connected]: Pin not connected
+    ; error
+    @(4250 mils, 2950 mils): Symbol ESP_Left Pin 8 [Pin_8, Passive, Line]
+[pin_not_connected]: Pin not connected
+    ; error
+    @(4250 mils, 3050 mils): Symbol ESP_Left Pin 9 [Pin_9, Passive, Line]
+[global_label_dangling]: Global label not connected anywhere else in the schematic
+    ; warning
+    @(4550 mils, 2650 mils): Global Label 'D33'
+[pin_not_connected]: Pin not connected
+    ; error
+    @(4250 mils, 3150 mils): Symbol ESP_Left Pin 10 [Pin_10, Passive, Line]
+[global_label_dangling]: Global label not connected anywhere else in the schematic
+    ; warning
+    @(4550 mils, 2750 mils): Global Label 'D25'
+[pin_not_connected]: Pin not connected
+    ; error
+    @(4250 mils, 3250 mils): Symbol ESP_Left Pin 11 [Pin_11, Passive, Line]
+[pin_not_connected]: Pin not connected
+    ; error
+    @(4250 mils, 3350 mils): Symbol ESP_Left Pin 12 [Pin_12, Passive, Line]
+[pin_not_connected]: Pin not connected
+    ; error
+    @(4250 mils, 3450 mils): Symbol ESP_Left Pin 13 [Pin_13, Passive, Line]
+[pin_not_connected]: Pin not connected
+    ; error
+    @(3000 mils, 4600 mils): Symbol RTK_Bottom_Left Pin 1 [Pin_1, Passive, Line]
+[pin_not_connected]: Pin not connected
+    ; error
+    @(4250 mils, 3550 mils): Symbol ESP_Left Pin 14 [Pin_14, Passive, Line]
+[pin_not_connected]: Pin not connected
+    ; error
+    @(3000 mils, 4700 mils): Symbol RTK_Bottom_Left Pin 2 [Pin_2, Passive, Line]
+[pin_not_connected]: Pin not connected
+    ; error
+    @(4250 mils, 3650 mils): Symbol ESP_Left Pin 15 [Pin_15, Passive, Line]
+[pin_not_connected]: Pin not connected
+    ; error
+    @(3000 mils, 4800 mils): Symbol RTK_Bottom_Left Pin 3 [Pin_3, Passive, Line]
+[pin_not_connected]: Pin not connected
+    ; error
+    @(3000 mils, 4900 mils): Symbol RTK_Bottom_Left Pin 4 [Pin_4, Passive, Line]
+[pin_not_connected]: Pin not connected
+    ; error
+    @(3000 mils, 5000 mils): Symbol RTK_Bottom_Left Pin 5 [Pin_5, Passive, Line]
+[pin_not_connected]: Pin not connected
+    ; error
+    @(3000 mils, 5100 mils): Symbol RTK_Bottom_Left Pin 6 [Pin_6, Passive, Line]
+[pin_not_connected]: Pin not connected
+    ; error
+    @(3000 mils, 5200 mils): Symbol RTK_Bottom_Left Pin 7 [Pin_7, Passive, Line]
+[pin_not_connected]: Pin not connected
+    ; error
+    @(3000 mils, 5300 mils): Symbol RTK_Bottom_Left Pin 8 [Pin_8, Passive, Line]
+[pin_not_connected]: Pin not connected
+    ; error
+    @(3000 mils, 5400 mils): Symbol RTK_Bottom_Left Pin 9 [Pin_9, Passive, Line]
+[pin_not_connected]: Pin not connected
+    ; error
+    @(3000 mils, 5500 mils): Symbol RTK_Bottom_Left Pin 10 [Pin_10, Passive, Line]
+[pin_not_connected]: Pin not connected
+    ; error
+    @(5900 mils, 2450 mils): Symbol ESP_Right Pin 3 [Pin_3, Passive, Line]
+[pin_not_connected]: Pin not connected
+    ; error
+    @(5900 mils, 2550 mils): Symbol ESP_Right Pin 4 [Pin_4, Passive, Line]
+[pin_not_connected]: Pin not connected
+    ; error
+    @(5900 mils, 3050 mils): Symbol ESP_Right Pin 9 [Pin_9, Passive, Line]
+[global_label_dangling]: Global label not connected anywhere else in the schematic
+    ; warning
+    @(6250 mils, 2250 mils): Global Label 'D23'
+[global_label_dangling]: Global label not connected anywhere else in the schematic
+    ; warning
+    @(6250 mils, 2350 mils): Global Label 'D22'
+[pin_not_connected]: Pin not connected
+    ; error
+    @(5900 mils, 3250 mils): Symbol ESP_Right Pin 11 [Pin_11, Passive, Line]
+[pin_not_connected]: Pin not connected
+    ; error
+    @(5900 mils, 3350 mils): Symbol ESP_Right Pin 12 [Pin_12, Passive, Line]
+[global_label_dangling]: Global label not connected anywhere else in the schematic
+    ; warning
+    @(6250 mils, 2650 mils): Global Label 'D21'
+[global_label_dangling]: Global label not connected anywhere else in the schematic
+    ; warning
+    @(6250 mils, 2750 mils): Global Label 'D19'
+[pin_not_connected]: Pin not connected
+    ; error
+    @(5900 mils, 3450 mils): Symbol ESP_Right Pin 13 [Pin_13, Passive, Line]
+[global_label_dangling]: Global label not connected anywhere else in the schematic
+    ; warning
+    @(6250 mils, 2850 mils): Global Label 'D18'
+[global_label_dangling]: Global label not connected anywhere else in the schematic
+    ; warning
+    @(6250 mils, 2950 mils): Global Label 'D5'
+[pin_not_connected]: Pin not connected
+    ; error
+    @(5900 mils, 3650 mils): Symbol ESP_Right Pin 15 [Pin_15, Passive, Line]
+[global_label_dangling]: Global label not connected anywhere else in the schematic
+    ; warning
+    @(6300 mils, 3150 mils): Global Label 'RX2'
+[pin_not_connected]: Pin not connected
+    ; error
+    @(8300 mils, 3050 mils): Symbol RTK_Top_Right Pin 1 [Pin_1, Passive, Line]
+[pin_not_connected]: Pin not connected
+    ; error
+    @(8300 mils, 3150 mils): Symbol RTK_Top_Right Pin 2 [Pin_2, Passive, Line]
+[pin_not_connected]: Pin not connected
+    ; error
+    @(8300 mils, 3250 mils): Symbol RTK_Top_Right Pin 3 [Pin_3, Passive, Line]
+[pin_not_connected]: Pin not connected
+    ; error
+    @(8300 mils, 3350 mils): Symbol RTK_Top_Right Pin 4 [Pin_4, Passive, Line]
+[pin_not_connected]: Pin not connected
+    ; error
+    @(8300 mils, 3450 mils): Symbol RTK_Top_Right Pin 5 [Pin_5, Passive, Line]
+[pin_not_connected]: Pin not connected
+    ; error
+    @(8300 mils, 3550 mils): Symbol RTK_Top_Right Pin 6 [Pin_6, Passive, Line]
+[pin_not_connected]: Pin not connected
+    ; error
+    @(8300 mils, 4400 mils): Symbol RTK_Bottom_Right Pin 3 [Pin_3, Passive, Line]
+[pin_not_connected]: Pin not connected
+    ; error
+    @(8300 mils, 4500 mils): Symbol RTK_Bottom_Right Pin 4 [Pin_4, Passive, Line]
+[pin_not_connected]: Pin not connected
+    ; error
+    @(8300 mils, 4600 mils): Symbol RTK_Bottom_Right Pin 5 [Pin_5, Passive, Line]
+[pin_not_connected]: Pin not connected
+    ; error
+    @(8300 mils, 4700 mils): Symbol RTK_Bottom_Right Pin 6 [Pin_6, Passive, Line]
+[global_label_dangling]: Global label not connected anywhere else in the schematic
+    ; warning
+    @(8550 mils, 4300 mils): Global Label 'GND'
+[pin_not_connected]: Pin not connected
+    ; error
+    @(8300 mils, 4800 mils): Symbol RTK_Bottom_Right Pin 7 [Pin_7, Passive, Line]
+[pin_not_connected]: Pin not connected
+    ; error
+    @(8300 mils, 4900 mils): Symbol RTK_Bottom_Right Pin 8 [Pin_8, Passive, Line]
+
+ ** ERC messages: 62  Errors 50  Warnings 12

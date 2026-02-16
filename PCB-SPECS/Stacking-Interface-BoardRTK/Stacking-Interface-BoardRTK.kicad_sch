@@ -3071,12 +3071,119 @@
 			)
 			(embedded_fonts no)
 		)
+		(symbol "power:PWR_FLAG"
+			(power)
+			(pin_numbers
+				(hide yes)
+			)
+			(pin_names
+				(offset 0)
+				(hide yes)
+			)
+			(exclude_from_sim no)
+			(in_bom yes)
+			(on_board yes)
+			(property "Reference" "#FLG"
+				(at 0 1.905 0)
+				(effects
+					(font
+						(size 1.27 1.27)
+					)
+					(hide yes)
+				)
+			)
+			(property "Value" "PWR_FLAG"
+				(at 0 3.81 0)
+				(effects
+					(font
+						(size 1.27 1.27)
+					)
+				)
+			)
+			(property "Footprint" ""
+				(at 0 0 0)
+				(effects
+					(font
+						(size 1.27 1.27)
+					)
+					(hide yes)
+				)
+			)
+			(property "Datasheet" "~"
+				(at 0 0 0)
+				(effects
+					(font
+						(size 1.27 1.27)
+					)
+					(hide yes)
+				)
+			)
+			(property "Description" "Special symbol for telling ERC where power comes from"
+				(at 0 0 0)
+				(effects
+					(font
+						(size 1.27 1.27)
+					)
+					(hide yes)
+				)
+			)
+			(property "ki_keywords" "flag power"
+				(at 0 0 0)
+				(effects
+					(font
+						(size 1.27 1.27)
+					)
+					(hide yes)
+				)
+			)
+			(symbol "PWR_FLAG_0_0"
+				(pin power_out line
+					(at 0 0 90)
+					(length 0)
+					(name "~"
+						(effects
+							(font
+								(size 1.27 1.27)
+							)
+						)
+					)
+					(number "1"
+						(effects
+							(font
+								(size 1.27 1.27)
+							)
+						)
+					)
+				)
+			)
+			(symbol "PWR_FLAG_0_1"
+				(polyline
+					(pts
+						(xy 0 0) (xy 0 1.27) (xy -1.016 1.905) (xy 0 2.54) (xy 1.016 1.905) (xy 0 1.27)
+					)
+					(stroke
+						(width 0)
+						(type default)
+					)
+					(fill
+						(type none)
+					)
+				)
+			)
+			(embedded_fonts no)
+		)
 	)
 	(junction
 		(at 215.9 106.68)
 		(diameter 0)
 		(color 0 0 0 0)
 		(uuid "b1c3ef54-0255-4c05-947f-1846aec1ebee")
+	)
+	(junction
+		(at 215.9 99.06)
+		(diameter 0)
+		(color 0 0 0 0)
+		(uuid "f694ec79-964d-4f61-bed7-b0833ed0d010")
 	)
 	(wire
 		(pts
@@ -3090,7 +3197,7 @@
 	)
 	(wire
 		(pts
-			(xy 215.9 106.68) (xy 215.9 95.25)
+			(xy 215.9 106.68) (xy 215.9 99.06)
 		)
 		(stroke
 			(width 0)
@@ -3340,6 +3447,16 @@
 	)
 	(wire
 		(pts
+			(xy 215.9 99.06) (xy 227.33 99.06)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "94bbe496-d5be-4aa1-b60f-0273293b6740")
+	)
+	(wire
+		(pts
 			(xy 149.86 69.85) (xy 142.24 69.85)
 		)
 		(stroke
@@ -3347,6 +3464,16 @@
 			(type default)
 		)
 		(uuid "95c5671f-b2f6-4db7-9ec0-db7d3601e342")
+	)
+	(wire
+		(pts
+			(xy 215.9 99.06) (xy 215.9 95.25)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "95d3739b-e09c-422a-a99b-e22540b726c3")
 	)
 	(wire
 		(pts
@@ -3772,7 +3899,7 @@
 		(dnp no)
 		(fields_autoplaced yes)
 		(uuid "0c1ec059-7dc4-4cb6-988b-f9f9a481e415")
-		(property "Reference" "RTK_Top_Right"
+		(property "Reference" "RTK_Top_Right1"
 			(at 206.375 72.39 0)
 			(effects
 				(font
@@ -3835,7 +3962,7 @@
 		(instances
 			(project ""
 				(path "/1750928f-7fe5-4459-8ec0-df0c49a4147a"
-					(reference "RTK_Top_Right")
+					(reference "RTK_Top_Right1")
 					(unit 1)
 				)
 			)
@@ -3851,7 +3978,7 @@
 		(dnp no)
 		(fields_autoplaced yes)
 		(uuid "27b76bcb-2af8-4796-8b37-1239792fd254")
-		(property "Reference" "Blue"
+		(property "Reference" "D1"
 			(at 95.25 46.6724 90)
 			(effects
 				(font
@@ -3860,7 +3987,7 @@
 				(justify left)
 			)
 		)
-		(property "Value" "LED"
+		(property "Value" "Blue"
 			(at 95.25 49.2124 90)
 			(effects
 				(font
@@ -3914,7 +4041,7 @@
 		(instances
 			(project ""
 				(path "/1750928f-7fe5-4459-8ec0-df0c49a4147a"
-					(reference "Blue")
+					(reference "D1")
 					(unit 1)
 				)
 			)
@@ -3930,7 +4057,7 @@
 		(dnp no)
 		(fields_autoplaced yes)
 		(uuid "2a570785-32c3-4af5-8c9d-fd7d31ac3e01")
-		(property "Reference" "Green(status)"
+		(property "Reference" "D2"
 			(at 87.63 41.5924 90)
 			(effects
 				(font
@@ -3939,7 +4066,7 @@
 				(justify left)
 			)
 		)
-		(property "Value" "LED"
+		(property "Value" "Green(Status)"
 			(at 87.63 44.1324 90)
 			(effects
 				(font
@@ -3993,7 +4120,7 @@
 		(instances
 			(project ""
 				(path "/1750928f-7fe5-4459-8ec0-df0c49a4147a"
-					(reference "Green(status)")
+					(reference "D2")
 					(unit 1)
 				)
 			)
@@ -4145,7 +4272,7 @@
 		(dnp no)
 		(fields_autoplaced yes)
 		(uuid "5e71bed7-e1e5-412a-952a-8f5631fb191a")
-		(property "Reference" "ESP_Right"
+		(property "Reference" "ESP_Right1"
 			(at 156.21 73.6599 0)
 			(effects
 				(font
@@ -4237,7 +4364,7 @@
 		(instances
 			(project ""
 				(path "/1750928f-7fe5-4459-8ec0-df0c49a4147a"
-					(reference "ESP_Right")
+					(reference "ESP_Right1")
 					(unit 1)
 				)
 			)
@@ -4520,7 +4647,7 @@
 		(dnp no)
 		(fields_autoplaced yes)
 		(uuid "87718d01-b72b-4204-968b-d99361b41c84")
-		(property "Reference" "RTK_Bottom_Left"
+		(property "Reference" "RTK_Bottom_Left1"
 			(at 71.755 111.76 0)
 			(effects
 				(font
@@ -4595,7 +4722,7 @@
 		(instances
 			(project ""
 				(path "/1750928f-7fe5-4459-8ec0-df0c49a4147a"
-					(reference "RTK_Bottom_Left")
+					(reference "RTK_Bottom_Left1")
 					(unit 1)
 				)
 			)
@@ -4611,7 +4738,7 @@
 		(dnp no)
 		(fields_autoplaced yes)
 		(uuid "899a4615-aa57-4434-b50b-ad3c1b236ca4")
-		(property "Reference" "ESP_Left"
+		(property "Reference" "ESP_Left1"
 			(at 114.3 73.6599 0)
 			(effects
 				(font
@@ -4703,7 +4830,7 @@
 		(instances
 			(project ""
 				(path "/1750928f-7fe5-4459-8ec0-df0c49a4147a"
-					(reference "ESP_Left")
+					(reference "ESP_Left1")
 					(unit 1)
 				)
 			)
@@ -4719,7 +4846,7 @@
 		(dnp no)
 		(fields_autoplaced yes)
 		(uuid "9943f6eb-5b34-4a54-9ca7-c6536c7e5a8f")
-		(property "Reference" "Button2(bigun)"
+		(property "Reference" "Button2(bigun)1"
 			(at 147.32 31.7499 90)
 			(effects
 				(font
@@ -4772,7 +4899,7 @@
 		(instances
 			(project ""
 				(path "/1750928f-7fe5-4459-8ec0-df0c49a4147a"
-					(reference "Button2(bigun)")
+					(reference "Button2(bigun)1")
 					(unit 1)
 				)
 			)
@@ -4988,7 +5115,7 @@
 		(dnp no)
 		(fields_autoplaced yes)
 		(uuid "cc848001-ef04-489c-85e1-a71a550c7da9")
-		(property "Reference" "RTK_Top_Left"
+		(property "Reference" "RTK_Top_Left1"
 			(at 71.755 77.47 0)
 			(effects
 				(font
@@ -5057,7 +5184,7 @@
 		(instances
 			(project ""
 				(path "/1750928f-7fe5-4459-8ec0-df0c49a4147a"
-					(reference "RTK_Top_Left")
+					(reference "RTK_Top_Left1")
 					(unit 1)
 				)
 			)
@@ -5268,6 +5395,72 @@
 		)
 	)
 	(symbol
+		(lib_id "power:PWR_FLAG")
+		(at 227.33 99.06 0)
+		(unit 1)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(dnp no)
+		(fields_autoplaced yes)
+		(uuid "e6d41282-6eed-4125-a1de-d54e723edb16")
+		(property "Reference" "#FLG01"
+			(at 227.33 97.155 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "Value" "PWR_FLAG"
+			(at 227.33 93.98 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Footprint" ""
+			(at 227.33 99.06 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "Datasheet" "~"
+			(at 227.33 99.06 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "Description" "Special symbol for telling ERC where power comes from"
+			(at 227.33 99.06 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(pin "1"
+			(uuid "9c595df9-a77b-4925-ae4d-eb7e0bd21872")
+		)
+		(instances
+			(project ""
+				(path "/1750928f-7fe5-4459-8ec0-df0c49a4147a"
+					(reference "#FLG01")
+					(unit 1)
+				)
+			)
+		)
+	)
+	(symbol
 		(lib_id "power:GND")
 		(at 92.71 35.56 180)
 		(unit 1)
@@ -5413,7 +5606,7 @@
 		(dnp no)
 		(fields_autoplaced yes)
 		(uuid "feaed2d9-71e8-45af-9b7f-0eee0b24aad7")
-		(property "Reference" "RTK_Bottom_Right"
+		(property "Reference" "RTK_Bottom_Right1"
 			(at 206.375 101.6 0)
 			(effects
 				(font
@@ -5482,7 +5675,7 @@
 		(instances
 			(project ""
 				(path "/1750928f-7fe5-4459-8ec0-df0c49a4147a"
-					(reference "RTK_Bottom_Right")
+					(reference "RTK_Bottom_Right1")
 					(unit 1)
 				)
 			)
