@@ -536,38 +536,36 @@
 		)
 	)
 	(footprint "Connector_PinHeader_2.54mm:PinHeader_1x10_P2.54mm_Vertical"
-		(layer "F.Cu")
+		(layer "B.Cu")
 		(uuid "07550de7-0d5b-4e73-b63d-bd441185c251")
 		(at 12 25.5 180)
 		(descr "Through hole straight pin header, 1x10, 2.54mm pitch, single row")
 		(tags "Through hole pin header THT 1x10 2.54mm single row")
 		(property "Reference" "RTK_Bottom_Left1"
-			(at 0 2.38 0)
-			(layer "B.SilkS")
+			(at 0 -2.38 0)
+			(layer "F.SilkS")
 			(uuid "55d691cf-da6e-4928-ae14-b1b5bf38f9d8")
 			(effects
 				(font
-					(size 1 1)
-					(thickness 0.15)
+					(size 0.6 0.6)
+					(thickness 0.1)
 				)
-				(justify mirror)
 			)
 		)
 		(property "Value" "Conn_01x10_Pin"
-			(at 0 -25.24 0)
-			(layer "B.Fab")
+			(at 0 25.24 0)
+			(layer "F.Fab")
 			(uuid "b7391b76-9567-4dbb-ae40-f56203dd80bc")
 			(effects
 				(font
 					(size 1 1)
 					(thickness 0.15)
 				)
-				(justify mirror)
 			)
 		)
 		(property "Datasheet" "~"
 			(at 0 0 0)
-			(layer "B.Fab")
+			(layer "F.Fab")
 			(hide yes)
 			(uuid "d06b7444-e124-40d2-8acb-adcd5819f899")
 			(effects
@@ -575,12 +573,11 @@
 					(size 1.27 1.27)
 					(thickness 0.15)
 				)
-				(justify mirror)
 			)
 		)
 		(property "Description" "Generic connector, single row, 01x10, script generated"
 			(at 0 0 0)
-			(layer "B.Fab")
+			(layer "F.Fab")
 			(hide yes)
 			(uuid "43a1e3d6-9710-4041-9cce-05dc5fe1c845")
 			(effects
@@ -588,7 +585,6 @@
 					(size 1.27 1.27)
 					(thickness 0.15)
 				)
-				(justify mirror)
 			)
 		)
 		(property ki_fp_filters "Connector*:*_1x??_*")
@@ -603,7 +599,7 @@
 				(width 0.12)
 				(type solid)
 			)
-			(layer "B.SilkS")
+			(layer "F.SilkS")
 			(uuid "a35a5cd5-0719-43c7-976a-2c82ffe174da")
 		)
 		(fp_line
@@ -613,7 +609,7 @@
 				(width 0.12)
 				(type solid)
 			)
-			(layer "B.SilkS")
+			(layer "F.SilkS")
 			(uuid "f0a399cc-328c-4acc-b3b6-00520c4a47d3")
 		)
 		(fp_line
@@ -623,7 +619,7 @@
 				(width 0.12)
 				(type solid)
 			)
-			(layer "B.SilkS")
+			(layer "F.SilkS")
 			(uuid "f3c36f7a-b066-4232-b668-df68ea7ab4d6")
 		)
 		(fp_line
@@ -633,7 +629,7 @@
 				(width 0.12)
 				(type solid)
 			)
-			(layer "B.SilkS")
+			(layer "F.SilkS")
 			(uuid "039a746f-d094-4ac9-83d3-97b15031cece")
 		)
 		(fp_line
@@ -643,7 +639,7 @@
 				(width 0.12)
 				(type solid)
 			)
-			(layer "B.SilkS")
+			(layer "F.SilkS")
 			(uuid "8074b435-bfb6-4ade-87be-4176bbe54f68")
 		)
 		(fp_line
@@ -653,7 +649,7 @@
 				(width 0.12)
 				(type solid)
 			)
-			(layer "B.SilkS")
+			(layer "F.SilkS")
 			(uuid "afbf6230-51fb-4361-8e4c-d4b9b0b7caae")
 		)
 		(fp_line
@@ -663,7 +659,7 @@
 				(width 0.05)
 				(type solid)
 			)
-			(layer "B.CrtYd")
+			(layer "F.CrtYd")
 			(uuid "0682222c-202a-4eac-b1f5-017d5536b06c")
 		)
 		(fp_line
@@ -673,7 +669,7 @@
 				(width 0.05)
 				(type solid)
 			)
-			(layer "B.CrtYd")
+			(layer "F.CrtYd")
 			(uuid "174a750b-6589-40a5-88b0-441e923106fe")
 		)
 		(fp_line
@@ -683,7 +679,7 @@
 				(width 0.05)
 				(type solid)
 			)
-			(layer "B.CrtYd")
+			(layer "F.CrtYd")
 			(uuid "4c29fe46-3bdd-46f8-8a44-ff0a5b3ca931")
 		)
 		(fp_line
@@ -693,7 +689,7 @@
 				(width 0.05)
 				(type solid)
 			)
-			(layer "B.CrtYd")
+			(layer "F.CrtYd")
 			(uuid "0786d333-f66e-4e8c-afd5-45119b3c92b3")
 		)
 		(fp_line
@@ -871,13 +867,13 @@
 		(embedded_fonts no)
 		(model "${KICAD9_3DMODEL_DIR}/Connector_PinHeader_2.54mm.3dshapes/PinHeader_1x10_P2.54mm_Vertical.step"
 			(offset
-				(xyz 0 0 0)
+				(xyz 0 11.43 0)
 			)
 			(scale
 				(xyz 1 1 1)
 			)
 			(rotate
-				(xyz 0 0 0)
+				(xyz 0 0 180)
 			)
 		)
 	)
@@ -3551,14 +3547,15 @@
 		(descr "Through hole straight pin header, 1x06, 2.54mm pitch, single row")
 		(tags "Through hole pin header THT 1x06 2.54mm single row")
 		(property "Reference" "RTK_Top_Right1"
-			(at 0 -2.38 0)
+			(at -14 -2.38 0)
 			(layer "F.SilkS")
 			(uuid "df0a8eee-8506-4a77-826e-183e59052e68")
 			(effects
 				(font
-					(size 1 1)
-					(thickness 0.15)
+					(size 0.6 0.6)
+					(thickness 0.1)
 				)
+				(justify right)
 			)
 		)
 		(property "Value" "Conn_01x06_Pin"
@@ -3831,7 +3828,7 @@
 		(embedded_fonts no)
 		(model "${KICAD9_3DMODEL_DIR}/Connector_PinHeader_2.54mm.3dshapes/PinHeader_1x06_P2.54mm_Vertical.step"
 			(offset
-				(xyz 0 0 0)
+				(xyz 0 0 -1.6)
 			)
 			(scale
 				(xyz 1 1 1)
@@ -3853,8 +3850,8 @@
 			(uuid "1077c5c1-3f52-426d-9c36-b16abafbeb06")
 			(effects
 				(font
-					(size 1 1)
-					(thickness 0.15)
+					(size 0.6 0.6)
+					(thickness 0.1)
 				)
 			)
 		)
@@ -4150,7 +4147,7 @@
 		(embedded_fonts no)
 		(model "${KICAD9_3DMODEL_DIR}/Connector_PinHeader_2.54mm.3dshapes/PinHeader_1x08_P2.54mm_Vertical.step"
 			(offset
-				(xyz 0 0 0)
+				(xyz 0 0 -1.6)
 			)
 			(scale
 				(xyz 1 1 1)
@@ -4167,14 +4164,15 @@
 		(descr "Through hole straight pin header, 1x08, 2.54mm pitch, single row")
 		(tags "Through hole pin header THT 1x08 2.54mm single row")
 		(property "Reference" "RTK_Bottom_Right1"
-			(at 0 -2.38 0)
+			(at -14 -2.38 0)
 			(layer "F.SilkS")
 			(uuid "b66aca99-9ca4-4661-8e91-9887d9573e9d")
 			(effects
 				(font
-					(size 1 1)
-					(thickness 0.15)
+					(size 0.6 0.6)
+					(thickness 0.1)
 				)
+				(justify right)
 			)
 		)
 		(property "Value" "Conn_01x08_Pin"
@@ -4469,7 +4467,7 @@
 		(embedded_fonts no)
 		(model "${KICAD9_3DMODEL_DIR}/Connector_PinHeader_2.54mm.3dshapes/PinHeader_1x08_P2.54mm_Vertical.step"
 			(offset
-				(xyz 0 0 0)
+				(xyz 0 0 -1.6)
 			)
 			(scale
 				(xyz 1 1 1)
@@ -4480,8 +4478,8 @@
 		)
 	)
 	(gr_rect
-		(start 6 1.5)
-		(end 63 94.5)
+		(start 2 0)
+		(end 67 96)
 		(stroke
 			(width 0.15)
 			(type default)
