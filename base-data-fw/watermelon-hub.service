@@ -1,0 +1,14 @@
+[Unit]
+Description=Watermelon Hub Server
+After=network.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/base-data-fw
+ExecStart=/home/pi/hub-env/bin/python3 app.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
