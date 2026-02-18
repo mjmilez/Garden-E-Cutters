@@ -247,6 +247,8 @@ void log_transfer_client_on_data_notify(const uint8_t *data, uint16_t len)
 {
 	ESP_LOGI(TAG, "DATA notify: len=%u", len);
 
+	ESP_LOGI(TAG, "chunk bytes: %02X %02X", data[0], data[1]);
+
 	if (!g_state.active) {
 		return;
 	}
@@ -261,13 +263,21 @@ void log_transfer_client_on_data_notify(const uint8_t *data, uint16_t len)
 	ESP_LOGI(TAG, "DATA notify: chunk=%u", chunkIndex);
 
 	if (chunkIndex != g_state.nextChunkIndex) {
-		ESP_LOGW(TAG, "Chunk out of order: got %u expected %u",
-		         chunkIndex, g_state.nextChunkIndex);
-		return;
+		ESP_LOGW(TAG, "Chunk mismatch: got %u expected %u (resync for debug)",
+				chunkIndex, g_state.nextChunkIndex);
+		g_state.nextChunkIndex = chunkIndex;
 	}
 
 	size_t payloadLen = len - 2;
 	const uint8_t *payload = &data[2];
+
+	printf("---- CHUNK %u (%u bytes) ----\n", chunkIndex, (unsigned)payloadLen);
+
+	for (size_t i = 0; i < payloadLen; i++) {
+		putchar(payload[i]);
+	}
+
+	printf("\n---- END CHUNK ----\n");
 
 	/* Stream into SPIFFS if an output file is active. */
 	if (g_state.fp) {

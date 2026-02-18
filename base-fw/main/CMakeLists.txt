@@ -7,6 +7,7 @@ idf_component_register(
         "main.c"       # high-level wiring: LED + BLE init
         "base_led.c"   # status LED task and control API
         "base_ble.c"   # BLE central logic: scan + connect to WM-SHEARS
+        "csv_debug_button.c"
         "log_transfer_client.c"
     INCLUDE_DIRS
         "."            # allow #include "base_led.h" and "base_ble.h"
