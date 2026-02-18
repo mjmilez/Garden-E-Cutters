@@ -20,6 +20,7 @@
 
 #include "driver/uart.h"
 #include "driver/gpio.h"
+#include "driver/ledc.h"
 
 #include "esp_log.h"
 
@@ -38,7 +39,28 @@
 #define GPS_UART_TX    GPIO_NUM_17
 #define GPS_BUF_SIZE   512
 
-#define GPS_BUTTON_PIN GPIO_NUM_23
+#define GPS_BUTTON_PIN    GPIO_NUM_23
+#define PRIME_BUTTON_PIN  GPIO_NUM_22
+#define CUT2_BUTTON_PIN   GPIO_NUM_19
+#define CUT3_BUTTON_PIN   GPIO_NUM_18
+
+#define LED_STATUS_PIN    GPIO_NUM_25
+#define PIEZO_PIN_A       GPIO_NUM_21
+#define PIEZO_PIN_B       GPIO_NUM_5
+
+#define CLEAR_HOLD_US         5000000
+#define BEEP_ON_MS            80
+#define BEEP_OFF_MS           80
+#define LED_BLINK_ON_MS       200
+#define LED_BLINK_OFF_MS      200
+
+#define PIEZO_LEDC_TIMER      LEDC_TIMER_0
+#define PIEZO_LEDC_CHANNEL_A  LEDC_CHANNEL_0
+#define PIEZO_LEDC_CHANNEL_B  LEDC_CHANNEL_1
+#define PIEZO_LEDC_MODE       LEDC_LOW_SPEED_MODE
+#define PIEZO_LEDC_RES        LEDC_TIMER_8_BIT
+#define PIEZO_LEDC_DUTY       128
+#define PIEZO_LEDC_FREQ_HZ    4000
 
 static const char *TAG = "gps_logger";
 
@@ -48,8 +70,16 @@ static volatile bool nmeaValid = false;
 
 static volatile bool saveRequestedFlag = false;
 
-static volatile bool clearRequestedFlag=false;
+static volatile bool clearRequestedFlag = false;
 static int64_t buttonPressTimeUs = 0;
+
+static volatile bool primed = false;
+static volatile bool primeBeepRequested = false;
+static volatile bool clearBeepRequested = false;
+static volatile int cutBeepCount = 0;
+
+static volatile bool gpsButtonHeld = false;
+static volatile bool clearTriggered = false;
 
 static volatile bool captureNextGGA=false;
 
@@ -63,29 +93,54 @@ static void storeGgaCsv(const char *nmea);
 static void printCsvFile(void);
 static void formatUtcTime(const char *nmeaUtc, char *out, size_t outLen);
 static void clearCSV(void);
+static void requestCutFeedback(void);
+static void beepPattern(int count);
+static void piezoInit(void);
+static void piezoSet(bool enable);
+static void toneDurationMs(uint32_t durationMs);
 
 static void IRAM_ATTR buttonIsrHandler(void *arg){
-  (void)arg;
+  gpio_num_t pin = (gpio_num_t)(intptr_t)arg;
 
-  int level=gpio_get_level(GPS_BUTTON_PIN);
+  int level = gpio_get_level(pin);
 
   //button is pressed
-  if(level==0){
-    buttonPressTimeUs=esp_timer_get_time();
-
-  }
-  else{
-    int64_t nowTime=esp_timer_get_time();
-    int64_t timeDiff= nowTime - buttonPressTimeUs;
-
-    //clear
-    if(timeDiff>2000000){
-      clearRequestedFlag=true;
+  if (level == 0) {
+    if (pin == GPS_BUTTON_PIN) {
+      buttonPressTimeUs = esp_timer_get_time();
+      gpsButtonHeld = true;
+      clearTriggered = false;
     }
-    //gps log
-    else{
-      // saveRequestedFlag=true;
-      captureNextGGA=true;
+    return;
+  }
+
+  if (pin == GPS_BUTTON_PIN) {
+    int64_t nowTime = esp_timer_get_time();
+    int64_t timeDiff = nowTime - buttonPressTimeUs;
+
+    gpsButtonHeld = false;
+    clearTriggered = false;
+
+    // short press -> capture (only when primed)
+    if (timeDiff < CLEAR_HOLD_US) {
+      if (primed && !captureNextGGA) {
+        captureNextGGA = true;
+        requestCutFeedback();
+      }
+    }
+    return;
+  }
+
+  if (pin == PRIME_BUTTON_PIN) {
+    primed = !primed;
+    primeBeepRequested = primed;
+    return;
+  }
+
+  if (pin == GPS_BUTTON_PIN || pin == CUT2_BUTTON_PIN || pin == CUT3_BUTTON_PIN) {
+    if (primed && !captureNextGGA) {
+      captureNextGGA = true;
+      requestCutFeedback();
     }
   }
 }
@@ -216,6 +271,71 @@ static void storeGgaCsv(const char *nmea){
 
   ESP_LOGI(TAG, "GPS point saved: time=%s lat=%.7f lon=%.7f",
            utc_time, lat, lon);
+}
+
+static void requestCutFeedback(void){
+  cutBeepCount++;
+}
+
+//this is for piezo!
+static void beepPattern(int count){
+  for (int i = 0; i < count; i++) {
+    piezoSet(true);
+    vTaskDelay(pdMS_TO_TICKS(BEEP_ON_MS));
+    piezoSet(false);
+    vTaskDelay(pdMS_TO_TICKS(BEEP_OFF_MS));
+  }
+}
+
+static void toneDurationMs(uint32_t durationMs){
+  piezoSet(true);
+  vTaskDelay(pdMS_TO_TICKS(durationMs));
+  piezoSet(false);
+}
+
+static void piezoInit(void){
+  ledc_timer_config_t timer_conf = {
+    .speed_mode       = PIEZO_LEDC_MODE,
+    .timer_num        = PIEZO_LEDC_TIMER,
+    .duty_resolution  = PIEZO_LEDC_RES,
+    .freq_hz          = PIEZO_LEDC_FREQ_HZ,
+    .clk_cfg          = LEDC_AUTO_CLK
+  };
+  ledc_timer_config(&timer_conf);
+
+  ledc_channel_config_t channel_conf = {
+    .gpio_num   = PIEZO_PIN_A,
+    .speed_mode = PIEZO_LEDC_MODE,
+    .channel    = PIEZO_LEDC_CHANNEL_A,
+    .intr_type  = LEDC_INTR_DISABLE,
+    .timer_sel  = PIEZO_LEDC_TIMER,
+    .duty       = 0,
+    .hpoint     = 0
+  };
+  ledc_channel_config(&channel_conf);
+
+  ledc_channel_config_t channel_conf_b = {
+    .gpio_num   = PIEZO_PIN_B,
+    .speed_mode = PIEZO_LEDC_MODE,
+    .channel    = PIEZO_LEDC_CHANNEL_B,
+    .intr_type  = LEDC_INTR_DISABLE,
+    .timer_sel  = PIEZO_LEDC_TIMER,
+    .duty       = 0,
+    .hpoint     = 0
+  };
+  channel_conf_b.flags.output_invert = 1;
+  ledc_channel_config(&channel_conf_b);
+}
+
+static void piezoSet(bool enable){
+  ledc_set_duty(PIEZO_LEDC_MODE,
+                PIEZO_LEDC_CHANNEL_A,
+                enable ? PIEZO_LEDC_DUTY : 0);
+  ledc_update_duty(PIEZO_LEDC_MODE, PIEZO_LEDC_CHANNEL_A);
+  ledc_set_duty(PIEZO_LEDC_MODE,
+                PIEZO_LEDC_CHANNEL_B,
+                enable ? PIEZO_LEDC_DUTY : 0);
+  ledc_update_duty(PIEZO_LEDC_MODE, PIEZO_LEDC_CHANNEL_B);
 }
 
 static void printCsvFile(void){
@@ -379,12 +499,27 @@ static void saveTask(void *arg){
   (void)arg;
 
   while (1) {
+    static int64_t lastBlinkUs = 0;
+    static bool ledOn = true;
+
+    if (gpsButtonHeld && !primed && !clearTriggered) {
+      int64_t nowUs = esp_timer_get_time();
+      if ((nowUs - buttonPressTimeUs) >= CLEAR_HOLD_US) {
+        clearTriggered = true;
+        clearRequestedFlag = true;
+        clearBeepRequested = true;
+      }
+    }
 
     if(clearRequestedFlag){
       clearRequestedFlag=false;
       clearCSV();
       memset(latestNmea, 0, sizeof(latestNmea));
       nmeaValid = false;
+      if (clearBeepRequested) {
+        clearBeepRequested = false;
+        toneDurationMs(2000);
+      }
     }
 
 
@@ -401,6 +536,33 @@ static void saveTask(void *arg){
       } 
       else {
         ESP_LOGW(TAG, "Save requested but no valid NMEA data available");
+      }
+    }
+
+    if (primeBeepRequested) {
+      primeBeepRequested = false;
+      beepPattern(3);
+    }
+
+    if (cutBeepCount > 0) {
+      int count = cutBeepCount;
+      cutBeepCount = 0;
+      beepPattern(count);
+    }
+
+    if (!primed) {
+      if (!ledOn) {
+        ledOn = true;
+        gpio_set_level(LED_STATUS_PIN, 1);
+      }
+    } 
+    else {
+      int64_t nowUs = esp_timer_get_time();
+      int64_t intervalUs = (ledOn ? LED_BLINK_ON_MS : LED_BLINK_OFF_MS) * 1000;
+      if ((nowUs - lastBlinkUs) >= intervalUs) {
+        ledOn = !ledOn;
+        gpio_set_level(LED_STATUS_PIN, ledOn ? 1 : 0);
+        lastBlinkUs = nowUs;
       }
     }
 
@@ -432,7 +594,10 @@ void gpsLoggerInit(void){
   ESP_LOGI(TAG, "UART2 configured for GPS at 115200 baud");
 
   gpio_config_t io_conf = {
-    .pin_bit_mask = 1ULL << GPS_BUTTON_PIN,
+    .pin_bit_mask = (1ULL << GPS_BUTTON_PIN) |
+                    (1ULL << PRIME_BUTTON_PIN) |
+                    (1ULL << CUT2_BUTTON_PIN) |
+                    (1ULL << CUT3_BUTTON_PIN),
     .mode         = GPIO_MODE_INPUT,
     .pull_up_en   = 1,
     .pull_down_en = 0,
@@ -440,8 +605,24 @@ void gpsLoggerInit(void){
   };
 
   gpio_config(&io_conf);
+
+  gpio_config_t out_conf = {
+    .pin_bit_mask = (1ULL << LED_STATUS_PIN),
+    .mode         = GPIO_MODE_OUTPUT,
+    .pull_up_en   = 0,
+    .pull_down_en = 0,
+    .intr_type    = GPIO_INTR_DISABLE
+  };
+  gpio_config(&out_conf);
+  gpio_set_level(LED_STATUS_PIN, 1);
+
+  piezoInit();
+
   gpio_install_isr_service(0);
-  gpio_isr_handler_add(GPS_BUTTON_PIN, buttonIsrHandler, NULL);
+  gpio_isr_handler_add(GPS_BUTTON_PIN, buttonIsrHandler, (void *)(intptr_t)GPS_BUTTON_PIN);
+  gpio_isr_handler_add(PRIME_BUTTON_PIN, buttonIsrHandler, (void *)(intptr_t)PRIME_BUTTON_PIN);
+  gpio_isr_handler_add(CUT2_BUTTON_PIN, buttonIsrHandler, (void *)(intptr_t)CUT2_BUTTON_PIN);
+  gpio_isr_handler_add(CUT3_BUTTON_PIN, buttonIsrHandler, (void *)(intptr_t)CUT3_BUTTON_PIN);
 
   ESP_LOGI(TAG, "Button interrupt configured on GPIO %d", GPS_BUTTON_PIN);
 
