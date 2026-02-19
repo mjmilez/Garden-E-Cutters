@@ -43,6 +43,7 @@
 #define PRIME_BUTTON_PIN  GPIO_NUM_22
 #define CUT2_BUTTON_PIN   GPIO_NUM_19
 #define CUT3_BUTTON_PIN   GPIO_NUM_18
+#define PRIME_ACTIVE_LEVEL 0
 
 #define LED_STATUS_PIN    GPIO_NUM_25
 #define PIEZO_PIN_A       GPIO_NUM_21
@@ -98,23 +99,42 @@ static void beepPattern(int count);
 static void piezoInit(void);
 static void piezoSet(bool enable);
 static void toneDurationMs(uint32_t durationMs);
+static void IRAM_ATTR updatePrimedStateFromLevel(int level);
+
+static void IRAM_ATTR updatePrimedStateFromLevel(int level){
+  bool newPrimed = (level == PRIME_ACTIVE_LEVEL);
+  if (newPrimed == primed) {
+    return;
+  }
+
+  primed = newPrimed;
+  if (primed) {
+    primeBeepRequested = true;
+  } else {
+    captureNextGGA = false;
+  }
+}
 
 static void IRAM_ATTR buttonIsrHandler(void *arg){
   gpio_num_t pin = (gpio_num_t)(intptr_t)arg;
 
   int level = gpio_get_level(pin);
 
-  //button is pressed
-  if (level == 0) {
-    if (pin == GPS_BUTTON_PIN) {
-      buttonPressTimeUs = esp_timer_get_time();
-      gpsButtonHeld = true;
-      clearTriggered = false;
-    }
+  if (pin == PRIME_BUTTON_PIN) {
+    // SPDT switch: primed state follows stable pin level.
+    updatePrimedStateFromLevel(level);
     return;
   }
 
   if (pin == GPS_BUTTON_PIN) {
+    // Button press starts hold timer; release decides short vs long action.
+    if (level == 0) {
+      buttonPressTimeUs = esp_timer_get_time();
+      gpsButtonHeld = true;
+      clearTriggered = false;
+      return;
+    }
+
     int64_t nowTime = esp_timer_get_time();
     int64_t timeDiff = nowTime - buttonPressTimeUs;
 
@@ -131,13 +151,7 @@ static void IRAM_ATTR buttonIsrHandler(void *arg){
     return;
   }
 
-  if (pin == PRIME_BUTTON_PIN) {
-    primed = !primed;
-    primeBeepRequested = primed;
-    return;
-  }
-
-  if (pin == GPS_BUTTON_PIN || pin == CUT2_BUTTON_PIN || pin == CUT3_BUTTON_PIN) {
+  if ((pin == CUT2_BUTTON_PIN || pin == CUT3_BUTTON_PIN) && level == 0) {
     if (primed && !captureNextGGA) {
       captureNextGGA = true;
       requestCutFeedback();
@@ -605,6 +619,8 @@ void gpsLoggerInit(void){
   };
 
   gpio_config(&io_conf);
+  updatePrimedStateFromLevel(gpio_get_level(PRIME_BUTTON_PIN));
+  primeBeepRequested = false;
 
   gpio_config_t out_conf = {
     .pin_bit_mask = (1ULL << LED_STATUS_PIN),
@@ -624,7 +640,9 @@ void gpsLoggerInit(void){
   gpio_isr_handler_add(CUT2_BUTTON_PIN, buttonIsrHandler, (void *)(intptr_t)CUT2_BUTTON_PIN);
   gpio_isr_handler_add(CUT3_BUTTON_PIN, buttonIsrHandler, (void *)(intptr_t)CUT3_BUTTON_PIN);
 
-  ESP_LOGI(TAG, "Button interrupt configured on GPIO %d", GPS_BUTTON_PIN);
+  ESP_LOGI(TAG, "Input interrupts configured on GPS=%d PRIME=%d CUT2=%d CUT3=%d",
+           GPS_BUTTON_PIN, PRIME_BUTTON_PIN, CUT2_BUTTON_PIN, CUT3_BUTTON_PIN);
+  ESP_LOGI(TAG, "Prime switch startup state: %s", primed ? "PRIMED" : "SAFE");
 
   xTaskCreate(uartReadTask, "gps_uart_read", 4096, NULL, 5, NULL);
   xTaskCreate(saveTask, "gps_save_task", 4096, NULL, 5, NULL);
