@@ -7,20 +7,13 @@
  *   - START_TRANSFER is written to the control characteristic with a filename
  *   - status updates arrive on the control characteristic
  *   - file chunks arrive on the data characteristic
- *   - each chunk's payload is forwarded to the Pi over UART
- *   - transfer completion/error status is also forwarded to the Pi
- * 
- * Beta Changes:
- *  - Removed SPIFFS file output (no local storage)
- *  - Removed RAM buffer fallback (assumes Pi can keep up with UART streaming)
- *  - Removed file dumping helper (no local file to read back from)
- *  - Added uart_bridge calls to forward data and status to the Pi
+ *   - payload is written to SPIFFS when available, otherwise stored in RAM
+ *   - on completion, the first few lines are printed for a quick sanity check
  */
 
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
-#include <inttypes.h>
 
 #include "esp_log.h"
 #include "esp_err.h"
@@ -30,7 +23,6 @@
 #include "log_transfer_client.h"
 #include "log_transfer_protocol.h"
 #include "log_paths.h"   /* GPS_LOG_FILE_PATH, GPS_LOG_FILE_BASENAME */
-#include "uart_bridge.h" /* uart_bridge_send_data, uart_bridge_send_status */
 
 static const char *TAG = "log_xfer_cli";
 
@@ -39,6 +31,11 @@ static const char *TAG = "log_xfer_cli";
 typedef struct {
 	bool     active;
 	char     requestedName[64];   /* name requested from the shears */
+	FILE    *fp;                  /* local output file (SPIFFS) */
+
+	/* RAM fallback when filesystem output is unavailable. */
+	uint8_t *buf;
+	uint32_t buf_size;
 
 	uint32_t expectedSize;
 	uint32_t bytesReceived;
@@ -47,6 +44,9 @@ typedef struct {
 
 static log_transfer_client_cfg_t g_cfg;
 static base_log_transfer_state_t g_state;
+
+/* Debug helper used after transfer completion. */
+static void dump_downloaded_file(void);
 
 /* --- Public API ----------------------------------------------------------- */
 
@@ -146,16 +146,48 @@ void log_transfer_client_on_ctrl_notify(const uint8_t *data, uint16_t len)
 		uint32_t fileSize = 0;
 		memcpy(&fileSize, &data[2], sizeof(fileSize));
 
-		/* Reset transfer state for the new transfer.*/
+		/* Tear down any previous transfer state. */
+		if (g_state.active) {
+			if (g_state.fp) {
+				fclose(g_state.fp);
+				g_state.fp = NULL;
+			}
+			if (g_state.buf) {
+				free(g_state.buf);
+				g_state.buf = NULL;
+				g_state.buf_size = 0;
+			}
+		}
+
+		/* Primary destination is SPIFFS; fall back to RAM on failure. */
+		g_state.fp = fopen(GPS_LOG_FILE_PATH, "wb");
+		if (!g_state.fp) {
+			ESP_LOGE(TAG,
+			         "Failed to open local file '%s', using RAM buffer only",
+			         GPS_LOG_FILE_PATH);
+
+			g_state.buf = (uint8_t *)malloc(fileSize);
+			if (!g_state.buf) {
+				ESP_LOGE(TAG, "RAM allocation failed for %u bytes", fileSize);
+				g_state.active = false;
+				return;
+			}
+			g_state.buf_size = fileSize;
+		} else {
+			ESP_LOGI(TAG, "Opened local file '%s' for writing", GPS_LOG_FILE_PATH);
+			g_state.buf = NULL;
+			g_state.buf_size = 0;
+		}
+
 		g_state.active         = true;
 		g_state.expectedSize   = fileSize;
 		g_state.bytesReceived  = 0;
 		g_state.nextChunkIndex = 0;
 
-		ESP_LOGI(TAG, "Transfer accepted; size=%" PRIu32 " bytes", fileSize);
-
-		/* Notify Pi that a transfer is starting. */
-		uart_bridge_send_status(UART_STATUS_TRANSFER_START);
+		ESP_LOGI(TAG, "Transfer accepted; size=%u bytes (dest='%s', RAM=%s)",
+		         fileSize,
+		         GPS_LOG_FILE_PATH,
+		         g_state.buf ? "yes" : "no");
 		break;
 	}
 
@@ -163,38 +195,46 @@ void log_transfer_client_on_ctrl_notify(const uint8_t *data, uint16_t len)
 		/* Transfer complete; close outputs and print a short preview. */
 		if (g_state.active) {
 			ESP_LOGI(TAG,
-			         "Transfer finished from shears: received=%" PRIu32 " bytes, expected=%" PRIu32,
+			         "Transfer finished from shears: received=%u bytes, expected=%u",
 			         g_state.bytesReceived, g_state.expectedSize);
 
+			if (g_state.fp) {
+				fclose(g_state.fp);
+				g_state.fp = NULL;
+			}
 		} else {
 			ESP_LOGW(TAG, "Transfer done but no active state");
 		}
 
 		g_state.active = false;
 
-		/* Notify Pi that the transfer is complete. */
-		uart_bridge_send_status(UART_STATUS_TRANSFER_DONE);
+		dump_downloaded_file();
 		break;
 
 	case STATUS_ERR_NO_FILE:
 		ESP_LOGW(TAG, "Shears: file not found");
-		uart_bridge_send_status(UART_STATUS_TRANSFER_ERROR);
 		break;
 
 	case STATUS_ERR_BUSY:
 		ESP_LOGW(TAG, "Shears: busy");
-		uart_bridge_send_status(UART_STATUS_TRANSFER_ERROR);
 		break;
 
 	case STATUS_ERR_FS:
 		ESP_LOGW(TAG, "Shears: filesystem error");
-		uart_bridge_send_status(UART_STATUS_TRANSFER_ERROR);
 		break;
 
 	case STATUS_TRANSFER_ABORTED:
 		ESP_LOGW(TAG, "Shears: transfer aborted");
+		if (g_state.active && g_state.fp) {
+			fclose(g_state.fp);
+			g_state.fp = NULL;
+		}
+		if (g_state.active && g_state.buf) {
+			free(g_state.buf);
+			g_state.buf = NULL;
+			g_state.buf_size = 0;
+		}
 		g_state.active = false;
-		uart_bridge_send_status(UART_STATUS_TRANSFER_ERROR);
 		break;
 
 	default:
@@ -206,6 +246,8 @@ void log_transfer_client_on_ctrl_notify(const uint8_t *data, uint16_t len)
 void log_transfer_client_on_data_notify(const uint8_t *data, uint16_t len)
 {
 	ESP_LOGI(TAG, "DATA notify: len=%u", len);
+
+	ESP_LOGI(TAG, "chunk bytes: %02X %02X", data[0], data[1]);
 
 	if (!g_state.active) {
 		return;
@@ -221,21 +263,96 @@ void log_transfer_client_on_data_notify(const uint8_t *data, uint16_t len)
 	ESP_LOGI(TAG, "DATA notify: chunk=%u", chunkIndex);
 
 	if (chunkIndex != g_state.nextChunkIndex) {
-		ESP_LOGW(TAG, "Chunk out of order: got %u expected %u",
-		         chunkIndex, g_state.nextChunkIndex);
-		return;
+		ESP_LOGW(TAG, "Chunk mismatch: got %u expected %u (resync for debug)",
+				chunkIndex, g_state.nextChunkIndex);
+		g_state.nextChunkIndex = chunkIndex;
 	}
 
 	size_t payloadLen = len - 2;
 	const uint8_t *payload = &data[2];
 
-	/* Forward the chunk payload to the Pi over UART. */
-	uart_bridge_send_log_line((const char *)payload, (uint16_t)payloadLen);
+	printf("---- CHUNK %u (%u bytes) ----\n", chunkIndex, (unsigned)payloadLen);
+
+	for (size_t i = 0; i < payloadLen; i++) {
+		putchar(payload[i]);
+	}
+
+	printf("\n---- END CHUNK ----\n");
+
+	/* Stream into SPIFFS if an output file is active. */
+	if (g_state.fp) {
+		size_t written = fwrite(payload, 1, payloadLen, g_state.fp);
+		(void)written;
+	}
+
+	/* Optional RAM copy when filesystem output is unavailable. */
+	if (g_state.buf && g_state.buf_size > 0) {
+		if (g_state.bytesReceived + payloadLen <= g_state.buf_size) {
+			memcpy(&g_state.buf[g_state.bytesReceived], payload, payloadLen);
+		} else {
+			ESP_LOGW(TAG, "RAM buffer overflow; dropping extra data");
+		}
+	}
 
 	g_state.bytesReceived += payloadLen;
 	g_state.nextChunkIndex++;
+}
 
-	ESP_LOGD(TAG, "Chunk %u forwarded: %u bytes (total %" PRIu32 "/%" PRIu32 ")",
-         chunkIndex, (unsigned)payloadLen,
-         g_state.bytesReceived, g_state.expectedSize);
+/* --- Debug helpers -------------------------------------------------------- */
+
+static void dump_downloaded_file(void)
+{
+	/* Prefer RAM buffer output when available. */
+	if (g_state.buf && g_state.expectedSize > 0) {
+		ESP_LOGI(TAG, "Dumping first lines from RAM buffer (%u bytes):",
+		         g_state.expectedSize);
+
+		const char *ptr = (const char *)g_state.buf;
+		const char *end = ptr + g_state.expectedSize;
+		char line[128];
+		int lineCount = 0;
+
+		while (ptr < end && lineCount < 5) {
+			size_t i = 0;
+
+			while (ptr < end && *ptr != '\n' && i < sizeof(line) - 1) {
+				line[i++] = *ptr++;
+			}
+			line[i] = '\0';
+
+			if (i > 0) {
+				ESP_LOGI(TAG, "%s", line);
+				lineCount++;
+			}
+
+			if (ptr < end && *ptr == '\n') {
+				ptr++;
+			}
+		}
+
+		/* RAM buffer is only retained for the duration of the transfer. */
+		free(g_state.buf);
+		g_state.buf = NULL;
+		g_state.buf_size = 0;
+
+		return;
+	}
+
+	/* Fall back to reading from SPIFFS if no RAM buffer exists. */
+	FILE *fp = fopen(GPS_LOG_FILE_PATH, "rb");
+	if (!fp) {
+		ESP_LOGE(TAG, "Could not open downloaded file '%s' for dump", GPS_LOG_FILE_PATH);
+		return;
+	}
+
+	ESP_LOGI(TAG, "Dumping first lines of '%s':", GPS_LOG_FILE_PATH);
+
+	char line[128];
+	int lineCount = 0;
+	while (fgets(line, sizeof(line), fp) && lineCount < 5) {
+		ESP_LOGI(TAG, "%s", line);
+		lineCount++;
+	}
+
+	fclose(fp);
 }
