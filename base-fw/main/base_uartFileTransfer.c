@@ -22,8 +22,8 @@
 #define UART_PORT			UART_NUM_1
 #define UART_BAUD			115200
 
-#define UART_TX_GPIO		(GPIO_NUM_35)   // Purple w/ white stripe on breadboard
-#define UART_RX_GPIO		(GPIO_NUM_34)   // Blue w/ white stripe on breadboard
+#define UART_TX_GPIO		(GPIO_NUM_17)   // Purple w/ white stripe on breadboard
+#define UART_RX_GPIO		(GPIO_NUM_16)   // Blue w/ white stripe on breadboard
 
 #define BUTTON_GPIO			(GPIO_NUM_32)
 #define BUTTON_ACTIVE_LOW	1
