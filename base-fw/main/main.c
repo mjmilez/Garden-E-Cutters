@@ -16,8 +16,13 @@
 #include "esp_err.h"
 #include "esp_spiffs.h"
 
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+
 #include "base_led.h"
 #include "base_ble.h"
+#include "csv_debug_button.h"
+#include "base_uartFileTransfer.h"
 #include "log_paths.h"   /* GPS_LOG_FILE_BASENAME, GPS_LOG_FILE_PATH */
 
 static const char *TAG = "app_main";
@@ -82,11 +87,16 @@ static void bleConnChanged(bool connected)
 void app_main(void)
 {
 	init_spiffs();
-
+	csvDebugButtonInit();
 	baseLedInit();
 	baseLedSetBlinking(true);
-
 	bleBaseInit(bleConnChanged);
+	uartFileTransferInit();
+
+	ESP_LOGI("main", "Ready. Press button to transfer CSV.");
+	while (1) {
+		vTaskDelay(pdMS_TO_TICKS(1000));
+	}
 
 	/* BLE and LED behavior run from their own tasks / callbacks. */
 }
