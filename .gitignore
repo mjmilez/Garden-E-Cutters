@@ -1,0 +1,26 @@
+# ESP-IDF build outputs
+build/
+sdkconfig
+sdkconfig.old
+CMakeCache.txt
+cmake-build-*/
+*.bin
+*.elf
+*.log
+
+# Editor files
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+#for matthew MAC
+shears-fw/.cache/
+
+# Python venv or tool cache
+venv/
+__pycache__/
+
+# Pycache & recieved files
+base-rpi-fw/__pycache__/
+base-rpi-fw/recieved_files/
