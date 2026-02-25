@@ -72,29 +72,6 @@ function initLeafletMapIfNeeded() {
 
 // ----- API fetch + normalization (minimal additions) -----
 
-function todayYYYYMMDD() {
-  const d = new Date();
-  const yyyy = d.getFullYear();
-  const mm = String(d.getMonth() + 1).padStart(2, "0");
-  const dd = String(d.getDate()).padStart(2, "0");
-  return `${yyyy}-${mm}-${dd}`;
-}
-
-// API utc_time: "192928.00" => "07:29 PM" (UTC time-of-day, no date)
-function utcTimeToAmPm(utcTime) {
-  if (!utcTime) return "12:00 AM";
-
-  const raw = String(utcTime).split(".")[0]; // "192928"
-  const hh = Number(raw.slice(0, 2) || 0);
-  const mm = Number(raw.slice(2, 4) || 0);
-
-  let hour12 = hh % 12;
-  if (hour12 === 0) hour12 = 12;
-
-  const ampm = hh >= 12 ? "PM" : "AM";
-  return `${hour12}:${String(mm).padStart(2, "0")} ${ampm}`;
-}
-
 // Fix common “Florida longitude comes in positive” issue.
 // Only flip sign when your configured map bounds are in the Western Hemisphere.
 function normalizeLonForBounds(lon) {
@@ -110,31 +87,30 @@ async function fetchCuts() {
 
   const apiCuts = await res.json();
 
-  // API has no date field, so we stamp "today" to keep your filters working.
-  // If you later add a date in the API, swap this out.
-  const dateStamp = todayYYYYMMDD();
-
+  // Keep raw fields so the table can show all columns.
+  // Also normalize lat/lon to numbers (and lon sign for Florida bounds).
   cutsData = (Array.isArray(apiCuts) ? apiCuts : []).map(row => ({
-    date: dateStamp,
-    time: utcTimeToAmPm(row.utc_time),
-    lat: Number(row.latitude),
-    lon: normalizeLonForBounds(Number(row.longitude))
+    id: row.id,
+    utc_time: row.utc_time,
+
+    latitude: Number(row.latitude),
+    longitude: normalizeLonForBounds(Number(row.longitude)),
+
+    altitude: row.altitude != null ? Number(row.altitude) : null,
+    fix_quality: row.fix_quality != null ? Number(row.fix_quality) : null,
+    geoid_height: row.geoid_height != null ? Number(row.geoid_height) : null,
+    hdop: row.hdop != null ? Number(row.hdop) : null,
+    num_satellites: row.num_satellites != null ? Number(row.num_satellites) : null
   }));
 }
 
 // ----- Helpers for sorting/filtering -----
 
-// Turn date+time into a sortable key "YYYY-MM-DD HH:MM" in 24h format
+// Sort newest first by utc_time (string HHMMSS.xx). If missing, push to end.
 function toSortKey(cut) {
-  const [timePart, ampm] = cut.time.split(" ");
-  let [hour, minute] = timePart.split(":").map(Number);
-
-  if (ampm === "PM" && hour !== 12) hour += 12;
-  if (ampm === "AM" && hour === 12) hour = 0;
-
-  const hourStr = String(hour).padStart(2, "0");
-  const minuteStr = String(minute).padStart(2, "0");
-  return `${cut.date} ${hourStr}:${minuteStr}`;
+  const raw = (cut.utc_time == null) ? "" : String(cut.utc_time);
+  const main = raw.split(".")[0].padStart(6, "0"); // "192928"
+  return main; // lexicographically sortable
 }
 
 function getFilteredCuts() {
@@ -144,12 +120,15 @@ function getFilteredCuts() {
   const startValue = startInput.value; // "YYYY-MM-DD" or ""
   const endValue = endInput.value;
 
+  // No real dates in API yet, so:
+  // - If no filter set => return all
+  // - If user sets dates => still return all (filters are effectively no-op)
+  // Keeping this minimal to avoid breaking UI until API provides a date field.
+  const ignoreDateFilter = (!startValue && !endValue);
+
   return cutsData
-    .filter(cut => {
-      if (!startValue && !endValue) return true;
-      const d = cut.date;
-      if (startValue && d < startValue) return false;
-      if (endValue && d > endValue) return false;
+    .filter(() => {
+      if (ignoreDateFilter) return true;
       return true;
     })
     .sort((a, b) => toSortKey(b).localeCompare(toSortKey(a))); // latest first
@@ -167,11 +146,37 @@ function renderTable() {
 
   filteredCuts.forEach(cut => {
     const tr = document.createElement("tr");
+
+    const lat = (typeof cut.latitude === "number" && !Number.isNaN(cut.latitude))
+      ? cut.latitude.toFixed(6)
+      : "";
+
+    const lon = (typeof cut.longitude === "number" && !Number.isNaN(cut.longitude))
+      ? cut.longitude.toFixed(6)
+      : "";
+
+    const altitude = (typeof cut.altitude === "number" && !Number.isNaN(cut.altitude))
+      ? cut.altitude.toFixed(2)
+      : (cut.altitude ?? "");
+
+    const geoid = (typeof cut.geoid_height === "number" && !Number.isNaN(cut.geoid_height))
+      ? cut.geoid_height.toFixed(2)
+      : (cut.geoid_height ?? "");
+
+    const hdop = (typeof cut.hdop === "number" && !Number.isNaN(cut.hdop))
+      ? cut.hdop.toFixed(2)
+      : (cut.hdop ?? "");
+
     tr.innerHTML = `
-      <td>${cut.date}</td>
-      <td>${cut.time}</td>
-      <td>${cut.lat.toFixed(6)}</td>
-      <td>${cut.lon.toFixed(6)}</td>
+      <td>${cut.id ?? ""}</td>
+      <td>${cut.utc_time ?? ""}</td>
+      <td>${lat}</td>
+      <td>${lon}</td>
+      <td>${altitude}</td>
+      <td>${cut.fix_quality ?? ""}</td>
+      <td>${geoid}</td>
+      <td>${hdop}</td>
+      <td>${cut.num_satellites ?? ""}</td>
     `;
     tbody.appendChild(tr);
   });
@@ -208,12 +213,17 @@ function updateMap(cuts) {
   if (!cuts.length) return;
 
   for (const cut of cuts) {
-    const [lat, lon] = clampLatLon(cut.lat, cut.lon);
+    const [lat, lon] = clampLatLon(cut.latitude, cut.longitude);
 
     const popupHtml =
-      `<b>${cut.date} ${cut.time}</b><br>` +
+      `<b>Cut ID: ${cut.id ?? ""}</b><br>` +
+      `UTC Time: ${cut.utc_time ?? ""}<br>` +
       `Lat: ${lat.toFixed(6)}<br>` +
-      `Lon: ${lon.toFixed(6)}`;
+      `Lon: ${lon.toFixed(6)}<br>` +
+      `Alt: ${cut.altitude ?? ""}<br>` +
+      `Fix: ${cut.fix_quality ?? ""}<br>` +
+      `HDOP: ${cut.hdop ?? ""}<br>` +
+      `Sats: ${cut.num_satellites ?? ""}`;
 
     const marker = L.circleMarker([lat, lon], {
       radius: 6,
@@ -228,14 +238,11 @@ function updateMap(cuts) {
 
 // ----- Initial UI setup -----
 function initFiltersDefaults() {
+  // No real dates in the API; leave date inputs blank (user can still set them, but they won't filter).
   const startInput = document.getElementById("timestamp-start");
   const endInput = document.getElementById("timestamp-end");
-
-  const sortedDates = [...new Set(cutsData.map(c => c.date))].sort();
-  if (sortedDates.length) {
-    startInput.value = sortedDates[0];
-    endInput.value = sortedDates[sortedDates.length - 1];
-  }
+  startInput.value = "";
+  endInput.value = "";
 }
 
 async function initDashboard() {
