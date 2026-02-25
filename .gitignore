@@ -21,5 +21,6 @@ shears-fw/.cache/
 venv/
 __pycache__/
 
-# Pycache
+# Pycache & recieved files
 base-rpi-fw/__pycache__/
+base-rpi-fw/recieved_files/
