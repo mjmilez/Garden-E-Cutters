@@ -19,7 +19,7 @@
 
 /* ───────────────────────── Config ───────────────────────── */
 
-#define UART_PORT			UART_NUM_1
+#define UART_PORT			UART_NUM_2
 #define UART_BAUD			115200
 
 #define UART_TX_GPIO		(GPIO_NUM_17)   // Purple w/ white stripe on breadboard
