@@ -20,3 +20,6 @@ shears-fw/.cache/
 # Python venv or tool cache
 venv/
 __pycache__/
+
+# Pycache
+base-rpi-fw/__pycache__/
