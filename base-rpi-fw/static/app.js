@@ -22,13 +22,8 @@ const MAP_BOUNDS = {
   maxLon: -80.031362   // Miami / eastern edge
 };
 
-// ----- Dummy data (NO forceN anymore) -----
-const dummyCuts = [
-  { date: "2025-11-13", time: "10:32 AM", lat: 29.650500, lon: -82.341500 },
-  { date: "2025-11-13", time: "10:29 AM", lat: 29.648000, lon: -82.366000 },
-  { date: "2025-11-12", time: "09:45 AM", lat: 29.642000, lon: -82.370000 },
-  { date: "2025-11-11", time: "03:15 PM", lat: 29.639500, lon: -82.347000 }
-];
+// ----- Data store (pulled from /api/cuts) -----
+let cutsData = [];  // will be filled by fetchCuts()
 
 // ---------------- Leaflet state ----------------
 let map = null;
@@ -75,6 +70,58 @@ function initLeafletMapIfNeeded() {
   mapInitialized = true;
 }
 
+// ----- API fetch + normalization (minimal additions) -----
+
+function todayYYYYMMDD() {
+  const d = new Date();
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
+}
+
+// API utc_time: "192928.00" => "07:29 PM" (UTC time-of-day, no date)
+function utcTimeToAmPm(utcTime) {
+  if (!utcTime) return "12:00 AM";
+
+  const raw = String(utcTime).split(".")[0]; // "192928"
+  const hh = Number(raw.slice(0, 2) || 0);
+  const mm = Number(raw.slice(2, 4) || 0);
+
+  let hour12 = hh % 12;
+  if (hour12 === 0) hour12 = 12;
+
+  const ampm = hh >= 12 ? "PM" : "AM";
+  return `${hour12}:${String(mm).padStart(2, "0")} ${ampm}`;
+}
+
+// Fix common “Florida longitude comes in positive” issue.
+// Only flip sign when your configured map bounds are in the Western Hemisphere.
+function normalizeLonForBounds(lon) {
+  if (typeof lon !== "number") return lon;
+  const boundsAreWest = MAP_BOUNDS.maxLon < 0 && MAP_BOUNDS.minLon < 0;
+  if (boundsAreWest && lon > 0) return -lon;
+  return lon;
+}
+
+async function fetchCuts() {
+  const res = await fetch("/api/cuts", { cache: "no-store" });
+  if (!res.ok) throw new Error(`GET /api/cuts failed: ${res.status}`);
+
+  const apiCuts = await res.json();
+
+  // API has no date field, so we stamp "today" to keep your filters working.
+  // If you later add a date in the API, swap this out.
+  const dateStamp = todayYYYYMMDD();
+
+  cutsData = (Array.isArray(apiCuts) ? apiCuts : []).map(row => ({
+    date: dateStamp,
+    time: utcTimeToAmPm(row.utc_time),
+    lat: Number(row.latitude),
+    lon: normalizeLonForBounds(Number(row.longitude))
+  }));
+}
+
 // ----- Helpers for sorting/filtering -----
 
 // Turn date+time into a sortable key "YYYY-MM-DD HH:MM" in 24h format
@@ -97,7 +144,7 @@ function getFilteredCuts() {
   const startValue = startInput.value; // "YYYY-MM-DD" or ""
   const endValue = endInput.value;
 
-  return dummyCuts
+  return cutsData
     .filter(cut => {
       if (!startValue && !endValue) return true;
       const d = cut.date;
@@ -184,20 +231,28 @@ function initFiltersDefaults() {
   const startInput = document.getElementById("timestamp-start");
   const endInput = document.getElementById("timestamp-end");
 
-  const sortedDates = [...new Set(dummyCuts.map(c => c.date))].sort();
+  const sortedDates = [...new Set(cutsData.map(c => c.date))].sort();
   if (sortedDates.length) {
     startInput.value = sortedDates[0];
     endInput.value = sortedDates[sortedDates.length - 1];
   }
 }
 
-function initDashboard() {
+async function initDashboard() {
   // Status bar - pretend we connected successfully
   const statusDot = document.getElementById("connection-status-dot");
   const statusText = document.getElementById("connection-status-text");
 
   statusDot.classList.add("connected");
   statusText.textContent = "Connected to Shears";
+
+  // Load cuts from API
+  try {
+    await fetchCuts();
+  } catch (err) {
+    console.error(err);
+    cutsData = []; // keep UI stable
+  }
 
   // Tabs
   const tabButtons = document.querySelectorAll(".tab-button");
