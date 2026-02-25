@@ -17,20 +17,12 @@ body {
   background-color: #f3f4f6;  /* light gray */
   color: #111827;
   line-height: 1.4;
-}
 
-/* Utility */
-.hidden {
-  display: none !important;
-}
-
-/* ===== Layout ===== */
-
-body {
   display: flex;
   flex-direction: column;
 }
 
+/* ===== Header ===== */
 header#top-bar {
   display: flex;
   align-items: center;
@@ -94,12 +86,11 @@ header#top-bar h1 {
 }
 
 /* ===== Tabs Bar ===== */
-
 nav#tabs {
   display: flex;
   align-items: stretch;
   background-color: #e5e7eb;
-  padding: 0;                 /* no inner padding so tabs can use full width */
+  padding: 0;
 }
 
 /* each tab takes up 50% of the bar */
@@ -107,14 +98,14 @@ nav#tabs {
   flex: 1 1 0;
   border: none;
   background: transparent;
-  margin: 0;                  /* IMPORTANT: remove any margin-left/right */
+  margin: 0;
   padding: 0.75rem 0;
   font-size: 0.95rem;
   font-weight: 500;
   color: #4b5563;
   border-radius: 0.5rem 0.5rem 0 0;
   cursor: pointer;
-  text-align: center;         /* center the label in each tab */
+  text-align: center;
   transition: background-color 0.15s ease,
               color 0.15s ease,
               box-shadow 0.15s ease;
@@ -131,9 +122,7 @@ nav#tabs {
   box-shadow: 0 -1px 0 0 #f9fafb, 0 -2px 0 0 #065f46;
 }
 
-
 /* ===== Main Content ===== */
-
 main {
   flex: 1;
   padding: 1rem 1.5rem 1.5rem;
@@ -153,7 +142,6 @@ main {
 }
 
 /* ===== Logs View ===== */
-
 #log-tab {
   display: flex;
   flex-direction: column;
@@ -261,87 +249,32 @@ main {
   background-color: #e0f2fe;
 }
 
-/* ===== Map View ===== */
-
+/* ===== Map View (Leaflet) ===== */
 #map-tab {
-  min-height: 400px;
+  min-height: 420px;
 }
 
-#map-container {
-  position: relative;
+/* Leaflet MUST have an explicit height */
+#leaflet-map {
   width: 100%;
-  aspect-ratio: 2047 / 1032;   /* <- NEW: lock container to same ratio as image */
+  height: 70vh;
+  min-height: 420px;
   border-radius: 0.75rem;
-  background-color: #111827;
-  background-image: url("gnv_pic.png");
-  background-size: 100% 100%;  /* now safe: no distortion because ratios match */
-  background-position: center;
   overflow: hidden;
   box-shadow: 0 1px 3px rgba(0,0,0,0.2);
 }
 
-
-/* overlay where we draw markers */
-#map-overlay {
-  position: absolute;
-  inset: 0;
+#map-hint {
+  margin-top: 0.75rem;
+  font-size: 0.85rem;
+  color: #374151;
+  background: #eef2ff;
+  border: 1px solid #c7d2fe;
+  padding: 0.6rem 0.8rem;
+  border-radius: 0.6rem;
 }
-
-/* individual cut marker */
-.map-marker {
-  position: absolute;
-  width: 0;
-  height: 0;
-  transform: translate(-50%, -100%); /* anchor bottom tip on the location */
-  pointer-events: auto;              /* allow hover for tooltip */
-}
-
-/* Pin body */
-.map-marker::before {
-  content: '';
-  position: absolute;
-  width: 18px;
-  height: 18px;
-  background: #ef4444;               /* red */
-  border-radius: 50% 50% 50% 0;
-  transform: rotate(-45deg);
-  border: 2px solid #ffffff;
-  box-shadow: 0 0 4px rgba(0,0,0,0.4);
-}
-
-/* Inner white circle */
-.map-marker::after {
-  content: '';
-  position: absolute;
-  top: 5px;
-  left: 7px;
-  width: 6px;
-  height: 6px;
-  background: #ffffff;
-  border-radius: 50%;
-}
-
-#map-tooltip {
-  position: absolute;
-  padding: 0.4rem 0.6rem;
-  font-size: 0.75rem;
-  background: rgba(17, 24, 39, 0.9);
-  color: #f9fafb;
-  border-radius: 0.4rem;
-  box-shadow: 0 2px 6px rgba(0,0,0,0.4);
-  pointer-events: none;
-  opacity: 0;
-  transform: translateY(-120%); /* only vertical offset */
-  transition: opacity 0.1s ease;
-  white-space: nowrap;
-  z-index: 10;
-}
-
-
-
 
 /* ===== Responsive Tweaks ===== */
-
 @media (max-width: 900px) {
   header#top-bar {
     flex-direction: column;
@@ -354,15 +287,6 @@ main {
     justify-content: flex-start;
   }
 
-  nav#tabs {
-    display: flex;
-    align-items: stretch;
-    background-color: #e5e7eb;
-    padding: 0.25rem 1.5rem 0;
-    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
-    gap: 0.25rem;
-  }
-
   main {
     padding: 0.75rem 1rem 1rem;
   }
@@ -371,29 +295,9 @@ main {
     flex-direction: column;
     align-items: flex-start;
   }
-}
 
-@media (max-width: 600px) {
-  #cut-log-table th,
-  #cut-log-table td {
-    padding: 0.45rem 0.5rem;
-  }
-
-  header#top-bar h1 {
-    font-size: 0.95rem;
-  }
-
-  .tab-button {
-    flex: 1 1 0;              /* each tab takes up half the width */
-    border: none;
-    background: transparent;
-    padding: 0.6rem 1.25rem;
-    font-size: 0.95rem;
-    font-weight: 500;
-    color: #4b5563;
-    border-radius: 0.5rem 0.5rem 0 0;
-    cursor: pointer;
-    text-align: center;        /* center label in each tab */
-    transition: background-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+  #leaflet-map {
+    height: 62vh;
+    min-height: 360px;
   }
 }

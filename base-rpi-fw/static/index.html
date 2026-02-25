@@ -4,6 +4,14 @@
   <meta charset="UTF-8" />
   <title>Garden E-Cutters Dashboard</title>
   <link rel="stylesheet" href="style.css" />
+
+  <!-- Leaflet (CDN for browser testing) -->
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+    crossorigin=""
+  />
 </head>
 <body>
   <!-- Top bar -->
@@ -25,12 +33,12 @@
 
   <!-- Tab content containers -->
   <main>
-    <!-- ================= LOG TAB ================= -->
     <section id="log-tab" class="tab-content active">
-
       <!-- Filters -->
       <div id="log-filters">
-        <button id="filter-button">Apply Date Filter</button>
+        <button id="filter-button">Filter</button>
+
+        <!-- Force Threshold removed -->
 
         <label>
           Timestamp Range:
@@ -44,30 +52,27 @@
         <thead>
           <tr>
             <th>Date</th>
-            <th>Time (EST/EDT)</th>
+            <th>Time</th>
             <th>Latitude</th>
             <th>Longitude</th>
-            <th>Altitude (m)</th>
-            <th>Satellites</th>
-            <th>Fix Quality</th>
-            <th>HDOP</th>
           </tr>
         </thead>
-        <tbody id="cut-log-body">
-          <!-- JS injects rows here -->
-        </tbody>
+        <tbody id="cut-log-body"></tbody>
       </table>
     </section>
 
-    <!-- ================= MAP TAB ================= -->
     <section id="map-tab" class="tab-content">
-      <div id="map-container">
-        <div id="map-overlay"></div>
-        <div id="map-tooltip"></div>
-      </div>
+      <!-- Leaflet needs a real element with a height -->
+      <div id="leaflet-map"></div>
     </section>
-
   </main>
+
+  <!-- Leaflet JS (CDN for browser testing) -->
+  <script
+    src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+    integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+    crossorigin=""
+  ></script>
 
   <script src="app.js"></script>
 </body>
