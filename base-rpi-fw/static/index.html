@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Garden E-Cutters Dashboard</title>
+  <link rel="stylesheet" href="style.css" />
+
+  <!-- Leaflet (CDN for browser testing) -->
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+    crossorigin=""
+  />
+</head>
+<body>
+  <!-- Top bar -->
+  <header id="top-bar">
+    <h1>GARDEN E-CUTTERS</h1>
+    <div id="status-bar">
+      <span id="connection-status-dot"></span>
+      <span id="connection-status-text">Disconnected from Shears</span>
+      <span id="total-cuts-label">Total Cuts:</span>
+      <span id="total-cuts-value">0</span>
+    </div>
+  </header>
+
+  <!-- Tabs -->
+  <nav id="tabs">
+    <button class="tab-button active" data-tab="log-tab">Logs</button>
+    <button class="tab-button" data-tab="map-tab">Map</button>
+  </nav>
+
+  <!-- Tab content containers -->
+  <main>
+    <section id="log-tab" class="tab-content active">
+      <!-- Filters -->
+      <div id="log-filters">
+        <button id="filter-button">Filter</button>
+
+        <label>
+          Timestamp Range:
+          <input type="date" id="timestamp-start" />
+          <input type="date" id="timestamp-end" />
+        </label>
+      </div>
+
+      <!-- Log table -->
+      <table id="cut-log-table">
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>UTC Time</th>
+            <th>Latitude</th>
+            <th>Longitude</th>
+            <th>Altitude</th>
+            <th>Fix Quality</th>
+            <th>Geoid Height</th>
+            <th>HDOP</th>
+            <th># Satellites</th>
+          </tr>
+        </thead>
+        <tbody id="cut-log-body"></tbody>
+      </table>
+    </section>
+
+    <section id="map-tab" class="tab-content">
+      <!-- Leaflet needs a real element with a height -->
+      <div id="leaflet-map"></div>
+    </section>
+  </main>
+
+  <!-- Leaflet JS (CDN for browser testing) -->
+  <script
+    src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+    integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+    crossorigin=""
+  ></script>
+
+  <script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,678 @@
+/*
+ * gps_logger.c
+ *
+ * GPS NMEA logger for the shears firmware.
+ *
+ * Responsibilities:
+ *   - mount SPIFFS and ensure gps_points.csv exists with a header
+ *   - configure UART2 for 115200 baud NMEA input
+ *   - keep the most recent full NMEA sentence in latestNmea[]
+ *   - accept save requests from a GPIO button or gpsLoggerRequestSave()
+ *   - on save, parse $GPGGA and append one CSV row
+ */
+
+#include "gps_logger.h"
+
+#include <stdint.h>
+#include <string.h>
+#include <stdio.h>
+#include <stdlib.h>
+
+#include "driver/uart.h"
+#include "driver/gpio.h"
+#include "driver/ledc.h"
+
+#include "esp_log.h"
+
+#include "esp_timer.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+
+#include "esp_spiffs.h"
+#include "esp_err.h"
+
+#include "hal/gpio_types.h"
+#include "log_paths.h"
+
+#define GPS_UART_NUM   UART_NUM_2
+#define GPS_UART_RX    GPIO_NUM_16
+#define GPS_UART_TX    GPIO_NUM_17
+#define GPS_BUF_SIZE   512
+
+#define GPS_BUTTON_PIN    GPIO_NUM_23
+#define PRIME_BUTTON_PIN  GPIO_NUM_22
+#define CUT2_BUTTON_PIN   GPIO_NUM_19
+#define CUT3_BUTTON_PIN   GPIO_NUM_18
+#define PRIME_ACTIVE_LEVEL 0
+
+#define LED_STATUS_PIN    GPIO_NUM_25
+#define PIEZO_PIN_A       GPIO_NUM_21
+#define PIEZO_PIN_B       GPIO_NUM_5
+
+#define CLEAR_HOLD_US         5000000
+#define BEEP_ON_MS            80
+#define BEEP_OFF_MS           80
+#define LED_BLINK_ON_MS       200
+#define LED_BLINK_OFF_MS      200
+
+#define PIEZO_LEDC_TIMER      LEDC_TIMER_0
+#define PIEZO_LEDC_CHANNEL_A  LEDC_CHANNEL_0
+#define PIEZO_LEDC_CHANNEL_B  LEDC_CHANNEL_1
+#define PIEZO_LEDC_MODE       LEDC_LOW_SPEED_MODE
+#define PIEZO_LEDC_RES        LEDC_TIMER_8_BIT
+#define PIEZO_LEDC_DUTY       128
+#define PIEZO_LEDC_FREQ_HZ    4000
+
+static const char *TAG = "gps_logger";
+
+static char latestNmea[GPS_BUF_SIZE];
+
+static volatile bool nmeaValid = false;
+
+static volatile bool saveRequestedFlag = false;
+
+static volatile bool clearRequestedFlag = false;
+static int64_t buttonPressTimeUs = 0;
+
+static volatile bool primed = false;
+static volatile bool primeBeepRequested = false;
+static volatile bool clearBeepRequested = false;
+static volatile int cutBeepCount = 0;
+
+static volatile bool gpsButtonHeld = false;
+static volatile bool clearTriggered = false;
+
+static volatile bool captureNextGGA=false;
+
+
+static void buttonIsrHandler(void *arg);
+static void uartReadTask(void *arg);
+static void saveTask(void *arg);
+static void initSpiffs(void);
+static double nmeaToDecimal(const char *nmea_val, char hemisphere);
+static void storeGgaCsv(const char *nmea);
+static void printCsvFile(void);
+static void formatUtcTime(const char *nmeaUtc, char *out, size_t outLen);
+static void clearCSV(void);
+static void requestCutFeedback(void);
+static void beepPattern(int count);
+static void piezoInit(void);
+static void piezoSet(bool enable);
+static void toneDurationMs(uint32_t durationMs);
+static void IRAM_ATTR updatePrimedStateFromLevel(int level);
+
+static void IRAM_ATTR updatePrimedStateFromLevel(int level){
+  bool newPrimed = (level == PRIME_ACTIVE_LEVEL);
+  if (newPrimed == primed) {
+    return;
+  }
+
+  primed = newPrimed;
+  if (primed) {
+    primeBeepRequested = true;
+  } else {
+    captureNextGGA = false;
+  }
+}
+
+static void IRAM_ATTR buttonIsrHandler(void *arg){
+  gpio_num_t pin = (gpio_num_t)(intptr_t)arg;
+
+  int level = gpio_get_level(pin);
+
+  if (pin == PRIME_BUTTON_PIN) {
+    // SPDT switch: primed state follows stable pin level.
+    updatePrimedStateFromLevel(level);
+    return;
+  }
+
+  if (pin == GPS_BUTTON_PIN) {
+    // Button press starts hold timer; release decides short vs long action.
+    if (level == 0) {
+      buttonPressTimeUs = esp_timer_get_time();
+      gpsButtonHeld = true;
+      clearTriggered = false;
+      return;
+    }
+
+    int64_t nowTime = esp_timer_get_time();
+    int64_t timeDiff = nowTime - buttonPressTimeUs;
+
+    gpsButtonHeld = false;
+    clearTriggered = false;
+
+    // short press -> capture (only when primed)
+    if (timeDiff < CLEAR_HOLD_US) {
+      if (primed && !captureNextGGA) {
+        captureNextGGA = true;
+        requestCutFeedback();
+      }
+    }
+    return;
+  }
+
+  if ((pin == CUT2_BUTTON_PIN || pin == CUT3_BUTTON_PIN) && level == 0) {
+    if (primed && !captureNextGGA) {
+      captureNextGGA = true;
+      requestCutFeedback();
+    }
+  }
+}
+
+
+static void uartReadTask(void *arg){
+  (void)arg;
+
+  uint8_t data[GPS_BUF_SIZE];
+  static char nmea_buf[GPS_BUF_SIZE];
+  size_t nmea_len = 0;
+
+  while (1) {
+    int len = uart_read_bytes(GPS_UART_NUM,
+                              data,
+                              GPS_BUF_SIZE - 1,
+                              pdMS_TO_TICKS(100));
+
+    if (len > 0) {
+      for (int i = 0; i < len; i++) {
+        char c = (char)data[i];
+
+        if (nmea_len < GPS_BUF_SIZE - 1) {
+          nmea_buf[nmea_len++] = c;
+        }
+
+        if (c == '\n') {
+          nmea_buf[nmea_len] = '\0';
+
+          // if short-press requested a capture, check if this is GGA
+          if (captureNextGGA && strncmp(nmea_buf, "$GNGGA,", 7) == 0) {
+            strncpy(latestNmea, nmea_buf, GPS_BUF_SIZE);
+            nmeaValid = true;
+
+            // disarm the capture and request save
+            captureNextGGA = false;
+            saveRequestedFlag = true;
+          }
+
+    nmea_len = 0;
+}
+
+
+      }
+    }
+
+    vTaskDelay(pdMS_TO_TICKS(10));
+  }
+}
+
+static double nmeaToDecimal(const char *nmea_val, char hemisphere){
+  double val = atof(nmea_val);
+  int degrees = (int)(val / 100);
+  double minutes = val - (degrees * 100);
+  double decimal = degrees + minutes / 60.0;
+
+  if (hemisphere == 'S' || hemisphere == 'W') {
+    decimal *= -1;
+  }
+
+  return decimal;
+}
+
+static void clearCSV(void){
+  FILE* f=fopen(GPS_LOG_FILE_PATH, "w");
+  if(!f){
+    ESP_LOGE(TAG, "Could not open file to clear CSV");
+    return;
+  }
+  else{
+    fprintf(f,
+            "utc_time,latitude,longitude,fix_quality,"
+            "num_satellites,hdop,altitude,geoid_height\n");
+    fclose(f);
+    ESP_LOGW(TAG, "GPS CSV cleared");
+  }
+}
+
+static void storeGgaCsv(const char *nmea){
+  if (strncmp(nmea, "$GNGGA,", 7) != 0) {
+    return;
+  }
+
+  char copy[GPS_BUF_SIZE];
+  strncpy(copy, nmea, GPS_BUF_SIZE);
+
+  char *tokens[20];
+  int i = 0;
+  char *tok = strtok(copy, ",");
+
+  while (tok != NULL && i < 20) {
+    tokens[i++] = tok;
+    tok = strtok(NULL, ",");
+  }
+
+  if (i < 12) {
+    ESP_LOGW(TAG, "GNGGA sentence too short, i=%d", i);
+    return;
+  }
+
+
+  const char *utc_time = tokens[1];
+  double lat = nmeaToDecimal(tokens[2], tokens[3][0]);
+  double lon = nmeaToDecimal(tokens[4], tokens[5][0]);
+  int fix = atoi(tokens[6]);
+  int num_sats = atoi(tokens[7]);
+  double hdop = atof(tokens[8]);
+  double altitude = atof(tokens[9]);
+  double geoid_height = atof(tokens[11]);
+
+  FILE *f = fopen(GPS_LOG_FILE_PATH, "a");
+  if (!f) {
+    ESP_LOGE(TAG, "Error opening CSV for append");
+    return;
+  }
+
+  fprintf(f, "%s,%.7f,%.7f,%d,%d,%.1f,%.3f,%.3f\n",
+          utc_time,
+          lat,
+          lon,
+          fix,
+          num_sats,
+          hdop,
+          altitude,
+          geoid_height);
+
+  fclose(f);
+
+  ESP_LOGI(TAG, "GPS point saved: time=%s lat=%.7f lon=%.7f",
+           utc_time, lat, lon);
+}
+
+static void requestCutFeedback(void){
+  cutBeepCount++;
+}
+
+//this is for piezo!
+static void beepPattern(int count){
+  for (int i = 0; i < count; i++) {
+    piezoSet(true);
+    vTaskDelay(pdMS_TO_TICKS(BEEP_ON_MS));
+    piezoSet(false);
+    vTaskDelay(pdMS_TO_TICKS(BEEP_OFF_MS));
+  }
+}
+
+static void toneDurationMs(uint32_t durationMs){
+  piezoSet(true);
+  vTaskDelay(pdMS_TO_TICKS(durationMs));
+  piezoSet(false);
+}
+
+static void piezoInit(void){
+  ledc_timer_config_t timer_conf = {
+    .speed_mode       = PIEZO_LEDC_MODE,
+    .timer_num        = PIEZO_LEDC_TIMER,
+    .duty_resolution  = PIEZO_LEDC_RES,
+    .freq_hz          = PIEZO_LEDC_FREQ_HZ,
+    .clk_cfg          = LEDC_AUTO_CLK
+  };
+  ledc_timer_config(&timer_conf);
+
+  ledc_channel_config_t channel_conf = {
+    .gpio_num   = PIEZO_PIN_A,
+    .speed_mode = PIEZO_LEDC_MODE,
+    .channel    = PIEZO_LEDC_CHANNEL_A,
+    .intr_type  = LEDC_INTR_DISABLE,
+    .timer_sel  = PIEZO_LEDC_TIMER,
+    .duty       = 0,
+    .hpoint     = 0
+  };
+  ledc_channel_config(&channel_conf);
+
+  ledc_channel_config_t channel_conf_b = {
+    .gpio_num   = PIEZO_PIN_B,
+    .speed_mode = PIEZO_LEDC_MODE,
+    .channel    = PIEZO_LEDC_CHANNEL_B,
+    .intr_type  = LEDC_INTR_DISABLE,
+    .timer_sel  = PIEZO_LEDC_TIMER,
+    .duty       = 0,
+    .hpoint     = 0
+  };
+  channel_conf_b.flags.output_invert = 1;
+  ledc_channel_config(&channel_conf_b);
+}
+
+static void piezoSet(bool enable){
+  ledc_set_duty(PIEZO_LEDC_MODE,
+                PIEZO_LEDC_CHANNEL_A,
+                enable ? PIEZO_LEDC_DUTY : 0);
+  ledc_update_duty(PIEZO_LEDC_MODE, PIEZO_LEDC_CHANNEL_A);
+  ledc_set_duty(PIEZO_LEDC_MODE,
+                PIEZO_LEDC_CHANNEL_B,
+                enable ? PIEZO_LEDC_DUTY : 0);
+  ledc_update_duty(PIEZO_LEDC_MODE, PIEZO_LEDC_CHANNEL_B);
+}
+
+static void printCsvFile(void){
+  FILE *f = fopen(GPS_LOG_FILE_PATH, "r");
+  if (!f) {
+    ESP_LOGE(TAG, "Could not open CSV file for read");
+    return;
+  }
+
+#define MAX_LINES 5
+#define LINE_BUF  256
+
+  char header[LINE_BUF] = {0};
+
+  char lines[MAX_LINES][LINE_BUF];
+  int lineNums[MAX_LINES];
+
+  int dataLinesSeen = 0;
+  char buffer[LINE_BUF];
+
+  //read header
+  if (!fgets(header, sizeof(header), f)) {
+    fclose(f);
+    ESP_LOGW(TAG, "CSV file is empty");
+    return;
+  }
+
+  //read data rows
+  while (fgets(buffer, sizeof(buffer), f)) {
+    int idx = dataLinesSeen % MAX_LINES;
+
+    strncpy(lines[idx], buffer, sizeof(lines[idx]) - 1);
+    lines[idx][sizeof(lines[idx]) - 1] = '\0';
+
+    //header line is line 1 
+    //data line is after
+    lineNums[idx] = dataLinesSeen + 1;
+
+    dataLinesSeen++;
+  }
+
+  fclose(f);
+
+  ESP_LOGI(TAG, "---- Newest GPS Data Points ----");
+
+  if (dataLinesSeen == 0) {
+    ESP_LOGI(TAG, "(no data rows yet)");
+    return;
+  }
+
+  //table
+  printf("\n");
+  printf("line | %-11s | %-11s | %-12s | %-3s | %-4s | %-4s | %-8s | %-11s\n",
+         "utc_time", "latitude", "longitude", "fix", "sats", "hdop", "alt(m)", "geoid(m)");
+  printf("-----+-------------+-------------+--------------+-----+------+------+-"
+         "----------+------------\n");
+
+  int linesToPrint = (dataLinesSeen < MAX_LINES) ? dataLinesSeen : MAX_LINES;
+  int start = (dataLinesSeen >= MAX_LINES) ? (dataLinesSeen % MAX_LINES) : 0;
+
+  for (int i = 0; i < linesToPrint; i++) {
+    int idx = (start + i) % MAX_LINES;
+
+    char row[LINE_BUF];
+    strncpy(row, lines[idx], sizeof(row) - 1);
+    row[sizeof(row) - 1] = '\0';
+
+    // stripping
+    size_t len = strlen(row);
+    if (len > 0 && row[len - 1] == '\n') {
+      row[len - 1] = '\0';
+    }
+
+    char *tokens[8] = {0};
+    int t = 0;
+
+    char *tok = strtok(row, ",");
+    while (tok != NULL && t < 8) {
+      tokens[t++] = tok;
+      tok = strtok(NULL, ",");
+    }
+
+    if (t < 8) {
+      printf("%4d | (malformed) %s\n", lineNums[idx], lines[idx]);
+      continue;
+    }
+
+    //Utc time
+    char timeFmt[16];
+    formatUtcTime(tokens[0], timeFmt, sizeof(timeFmt));
+
+    printf("%4d | %-10s | %11s | %12s | %3s | %4s | %4s | %8s | %11s\n",
+           lineNums[idx],
+           timeFmt,
+           tokens[1], /* latitude */
+           tokens[2], /* longitude */
+           tokens[3], /* fix_quality */
+           tokens[4], /* num_satellites */
+           tokens[5], /* hdop */
+           tokens[6], /* altitude */
+           tokens[7]  /* geoid_height */
+           );
+  }
+
+  printf("\n");
+}
+
+static void initSpiffs(void){
+  esp_vfs_spiffs_conf_t conf = {
+    .base_path              = "/spiffs",
+    .partition_label        = "storage",
+    .max_files              = 5,
+    .format_if_mount_failed = true
+  };
+
+  esp_err_t ret = esp_vfs_spiffs_register(&conf);
+  if (ret != ESP_OK) {
+    if (ret == ESP_FAIL) {
+      ESP_LOGE(TAG, "Failed to mount or format SPIFFS");
+    } 
+    else if (ret == ESP_ERR_NOT_FOUND) {
+      ESP_LOGE(TAG, "SPIFFS partition not found");
+    } 
+    else {
+      ESP_LOGE(TAG, "SPIFFS init error (%s)", esp_err_to_name(ret));
+    }
+    return;
+  }
+
+  size_t total = 0, used = 0;
+  ret = esp_spiffs_info(conf.partition_label, &total, &used);
+  if (ret == ESP_OK) {
+    ESP_LOGI(TAG, "SPIFFS mounted: total=%u, used=%u",
+             (unsigned)total, (unsigned)used);
+  } 
+  else {
+    ESP_LOGW(TAG, "SPIFFS info failed (%s)", esp_err_to_name(ret));
+  }
+
+  // make sure csv prints with header
+  FILE *f = fopen(GPS_LOG_FILE_PATH, "r");
+  if (!f) {
+    f = fopen(GPS_LOG_FILE_PATH, "w");
+    if (f) {
+      fprintf(f,
+              "utc_time,latitude,longitude,fix_quality,"
+              "num_satellites,hdop,altitude,geoid_height\n");
+      fclose(f);
+      ESP_LOGI(TAG, "Created gps_points.csv with header");
+    } 
+    else {
+      ESP_LOGE(TAG, "Failed to create gps_points.csv");
+    }
+  } 
+  else {
+    fclose(f);
+  }
+}
+
+static void saveTask(void *arg){
+  (void)arg;
+
+  while (1) {
+    static int64_t lastBlinkUs = 0;
+    static bool ledOn = true;
+
+    if (gpsButtonHeld && !primed && !clearTriggered) {
+      int64_t nowUs = esp_timer_get_time();
+      if ((nowUs - buttonPressTimeUs) >= CLEAR_HOLD_US) {
+        clearTriggered = true;
+        clearRequestedFlag = true;
+        clearBeepRequested = true;
+      }
+    }
+
+    if(clearRequestedFlag){
+      clearRequestedFlag=false;
+      clearCSV();
+      memset(latestNmea, 0, sizeof(latestNmea));
+      nmeaValid = false;
+      if (clearBeepRequested) {
+        clearBeepRequested = false;
+        toneDurationMs(2000);
+      }
+    }
+
+
+    else if (saveRequestedFlag) {
+      saveRequestedFlag = false;
+
+      if (nmeaValid) {
+        ESP_LOGI(TAG, "Save requested; latest NMEA: %s", latestNmea);
+        storeGgaCsv(latestNmea);
+        nmeaValid = false;
+        //clear buffer
+        memset(latestNmea, 0, sizeof(latestNmea));
+        printCsvFile();
+      } 
+      else {
+        ESP_LOGW(TAG, "Save requested but no valid NMEA data available");
+      }
+    }
+
+    if (primeBeepRequested) {
+      primeBeepRequested = false;
+      beepPattern(3);
+    }
+
+    if (cutBeepCount > 0) {
+      int count = cutBeepCount;
+      cutBeepCount = 0;
+      beepPattern(count);
+    }
+
+    if (!primed) {
+      if (!ledOn) {
+        ledOn = true;
+        gpio_set_level(LED_STATUS_PIN, 1);
+      }
+    } 
+    else {
+      int64_t nowUs = esp_timer_get_time();
+      int64_t intervalUs = (ledOn ? LED_BLINK_ON_MS : LED_BLINK_OFF_MS) * 1000;
+      if ((nowUs - lastBlinkUs) >= intervalUs) {
+        ledOn = !ledOn;
+        gpio_set_level(LED_STATUS_PIN, ledOn ? 1 : 0);
+        lastBlinkUs = nowUs;
+      }
+    }
+
+    vTaskDelay(pdMS_TO_TICKS(10));
+  }
+}
+
+//main
+void gpsLoggerInit(void){
+  // init the spiffs filesystem
+  initSpiffs();
+
+  uart_config_t uart_config = {
+    .baud_rate = 115200,
+    .data_bits = UART_DATA_8_BITS,
+    .parity    = UART_PARITY_DISABLE,
+    .stop_bits = UART_STOP_BITS_1,
+    .flow_ctrl = UART_HW_FLOWCTRL_DISABLE
+  };
+
+  uart_param_config(GPS_UART_NUM, &uart_config);
+  uart_set_pin(GPS_UART_NUM,
+               GPS_UART_TX,
+               GPS_UART_RX,
+               UART_PIN_NO_CHANGE,
+               UART_PIN_NO_CHANGE);
+  uart_driver_install(GPS_UART_NUM, GPS_BUF_SIZE * 2, 0, 0, NULL, 0);
+
+  ESP_LOGI(TAG, "UART2 configured for GPS at 115200 baud");
+
+  gpio_config_t io_conf = {
+    .pin_bit_mask = (1ULL << GPS_BUTTON_PIN) |
+                    (1ULL << PRIME_BUTTON_PIN) |
+                    (1ULL << CUT2_BUTTON_PIN) |
+                    (1ULL << CUT3_BUTTON_PIN),
+    .mode         = GPIO_MODE_INPUT,
+    .pull_up_en   = 1,
+    .pull_down_en = 0,
+    .intr_type    = GPIO_INTR_ANYEDGE
+  };
+
+  gpio_config(&io_conf);
+  updatePrimedStateFromLevel(gpio_get_level(PRIME_BUTTON_PIN));
+  primeBeepRequested = false;
+
+  gpio_config_t out_conf = {
+    .pin_bit_mask = (1ULL << LED_STATUS_PIN),
+    .mode         = GPIO_MODE_OUTPUT,
+    .pull_up_en   = 0,
+    .pull_down_en = 0,
+    .intr_type    = GPIO_INTR_DISABLE
+  };
+  gpio_config(&out_conf);
+  gpio_set_level(LED_STATUS_PIN, 1);
+
+  piezoInit();
+
+  gpio_install_isr_service(0);
+  gpio_isr_handler_add(GPS_BUTTON_PIN, buttonIsrHandler, (void *)(intptr_t)GPS_BUTTON_PIN);
+  gpio_isr_handler_add(PRIME_BUTTON_PIN, buttonIsrHandler, (void *)(intptr_t)PRIME_BUTTON_PIN);
+  gpio_isr_handler_add(CUT2_BUTTON_PIN, buttonIsrHandler, (void *)(intptr_t)CUT2_BUTTON_PIN);
+  gpio_isr_handler_add(CUT3_BUTTON_PIN, buttonIsrHandler, (void *)(intptr_t)CUT3_BUTTON_PIN);
+
+  ESP_LOGI(TAG, "Input interrupts configured on GPS=%d PRIME=%d CUT2=%d CUT3=%d",
+           GPS_BUTTON_PIN, PRIME_BUTTON_PIN, CUT2_BUTTON_PIN, CUT3_BUTTON_PIN);
+  ESP_LOGI(TAG, "Prime switch startup state: %s", primed ? "PRIMED" : "SAFE");
+
+  xTaskCreate(uartReadTask, "gps_uart_read", 4096, NULL, 5, NULL);
+  xTaskCreate(saveTask, "gps_save_task", 4096, NULL, 5, NULL);
+}
+
+void gpsLoggerRequestSave(void){
+  if (nmeaValid) {
+    saveRequestedFlag = true;
+  } 
+  else {
+    ESP_LOGW(TAG, "Save requested but no valid NMEA data available");
+  }
+}
+
+void gpsLoggerPrintCsv(void){
+  printCsvFile();
+}
+
+static void formatUtcTime(const char *nmeaUtc, char *out, size_t outLen){
+  if (!nmeaUtc || strlen(nmeaUtc) < 6) {
+    snprintf(out, outLen, "--:--:--");
+    return;
+  }
+
+  char hh[3] = { nmeaUtc[0], nmeaUtc[1], '\0' };
+  char mm[3] = { nmeaUtc[2], nmeaUtc[3], '\0' };
+  char ss[16];
+
+  //copy time units
+  snprintf(ss, sizeof(ss), "%s", nmeaUtc + 4);
+
+  snprintf(out, outLen, "%s:%s:%s", hh, mm, ss);
+}
