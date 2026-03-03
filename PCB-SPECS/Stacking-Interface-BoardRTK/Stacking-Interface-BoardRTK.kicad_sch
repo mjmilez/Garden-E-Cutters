@@ -4953,7 +4953,7 @@
 				)
 			)
 		)
-		(property "Footprint" "Buzzer_Beeper:Buzzer_12x9.5RM7.6"
+		(property "Footprint" "Buzzer_Beeper:Buzzer_D14mm_H7mm_P10mm"
 			(at 146.558 121.158 0)
 			(effects
 				(font

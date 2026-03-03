@@ -536,14 +536,14 @@
 			)
 		)
 	)
-	(footprint "Buzzer_Beeper:Buzzer_12x9.5RM7.6"
+	(footprint "Buzzer_Beeper:Buzzer_D14mm_H7mm_P10mm"
 		(layer "F.Cu")
 		(uuid "2858600f-5a27-4c36-8687-2c46ce7d08ce")
-		(at 71.7 79.5)
-		(descr "Generic Buzzer, D12mm height 9.5mm with RM7.6mm")
+		(at 73.5 82.5)
+		(descr "Generic Buzzer, D14mm height 7mm with pitch 10mm")
 		(tags "buzzer")
 		(property "Reference" "BZ1"
-			(at 3.8 -7.2 0)
+			(at 5.16 -8.23 0)
 			(layer "F.SilkS")
 			(uuid "5f0dca4a-1a59-43db-bfa8-928111a3d388")
 			(effects
@@ -554,7 +554,7 @@
 			)
 		)
 		(property "Value" "Buzzer"
-			(at 3.8 7.4 0)
+			(at 4.69 8.41 0)
 			(layer "F.Fab")
 			(uuid "e697c332-de8b-4a91-9381-eff9377eb86b")
 			(effects
@@ -596,48 +596,48 @@
 		(sheetfile "Stacking-Interface-BoardRTK.kicad_sch")
 		(attr through_hole)
 		(fp_circle
-			(center 3.8 0)
-			(end 9.9 0)
+			(center 5 0)
+			(end 12.1 0)
 			(stroke
 				(width 0.12)
 				(type solid)
 			)
 			(fill no)
 			(layer "F.SilkS")
-			(uuid "1fb24a09-9c02-46b5-b113-d77a45d51f11")
+			(uuid "a575e22e-1600-4bb7-82de-8bda98954962")
 		)
 		(fp_circle
-			(center 3.8 0)
-			(end 10.05 0)
+			(center 5 0)
+			(end 12.25 0)
 			(stroke
 				(width 0.05)
 				(type solid)
 			)
 			(fill no)
 			(layer "F.CrtYd")
-			(uuid "6b071c5b-b51d-400b-922c-a5c628a88f94")
+			(uuid "fd2e3a47-6ff3-42ee-aa57-f86e11be11e8")
 		)
 		(fp_circle
-			(center 3.8 0)
-			(end 4.8 0)
+			(center 5 0)
+			(end 6 0)
 			(stroke
 				(width 0.1)
 				(type solid)
 			)
 			(fill no)
 			(layer "F.Fab")
-			(uuid "c22e66a6-e733-4594-a645-a086fd2eae11")
+			(uuid "80885b32-3838-4db8-b303-db83ad538e9f")
 		)
 		(fp_circle
-			(center 3.8 0)
-			(end 9.8 0)
+			(center 5 0)
+			(end 12 0)
 			(stroke
 				(width 0.1)
 				(type solid)
 			)
 			(fill no)
 			(layer "F.Fab")
-			(uuid "7307d767-1bdd-4aaf-9b31-b3c5b4e3f6e8")
+			(uuid "10e1218f-516c-44d9-85a6-e579bf9ae8ea")
 		)
 		(fp_text user "+"
 			(at -0.01 -2.54 0)
@@ -662,7 +662,7 @@
 			)
 		)
 		(fp_text user "${REFERENCE}"
-			(at 3.8 -4 0)
+			(at 5.32 2.27 0)
 			(layer "F.Fab")
 			(uuid "ce574f5a-ccda-4e72-ba02-b9146c745811")
 			(effects
@@ -684,7 +684,7 @@
 			(uuid "799f2713-663e-4fde-b89f-d6daf5d144f4")
 		)
 		(pad "2" thru_hole circle
-			(at 7.6 0)
+			(at 10 0)
 			(size 2 2)
 			(drill 1)
 			(layers "*.Cu" "*.Mask")
@@ -695,7 +695,7 @@
 			(uuid "929f4826-a0d5-4833-ac13-e5be158de538")
 		)
 		(embedded_fonts no)
-		(model "${KICAD9_3DMODEL_DIR}/Buzzer_Beeper.3dshapes/Buzzer_12x9.5RM7.6.step"
+		(model "${KICAD9_3DMODEL_DIR}/Buzzer_Beeper.3dshapes/Buzzer_D14mm_H7mm_P10mm.step"
 			(offset
 				(xyz 0 0 0)
 			)
@@ -1126,7 +1126,7 @@
 	(footprint "Button_Switch_THT:SW_PUSH_6mm"
 		(layer "F.Cu")
 		(uuid "4b770c8d-b80e-4c99-9479-0440624aa277")
-		(at 75.5 93.5)
+		(at 75.5 98.5)
 		(descr "Generic 6mm SW tactile push button")
 		(tags "tact sw push 6mm")
 		(property "Reference" "Button1"
@@ -1473,7 +1473,7 @@
 	(footprint "Button_Switch_THT:SW_Slide-03_Wuerth-WS-SLTV_10x2.5x6.4_P2.54mm"
 		(layer "F.Cu")
 		(uuid "4ec2963a-3857-4642-8d98-dffdd8ab0df8")
-		(at 65.21 95.25)
+		(at 64.46 101)
 		(descr "Wuerth, WS-SLTV, 450301014042, https://www.we-online.com/components/products/datasheet/450301014042.pdf")
 		(tags "switch single-pole opposite-side-connection double-throw SPDT würth wurth")
 		(property "Reference" "prime_switch1"
@@ -2017,7 +2017,7 @@
 	(footprint "Button_Switch_THT:SW_PUSH_6mm"
 		(layer "F.Cu")
 		(uuid "6ffb411e-a246-40b4-8df0-f141ee5f2dcd")
-		(at 87 93.5)
+		(at 87 98.5)
 		(descr "Generic 6mm SW tactile push button")
 		(tags "tact sw push 6mm")
 		(property "Reference" "Button2"
@@ -2324,7 +2324,7 @@
 			(net 4 "Net-(ESP_Right1-Pin_6)")
 			(pinfunction "1")
 			(pintype "passive")
-			(uuid "1f5e42e9-8c73-45cc-bc0d-45f6026e77b0")
+			(uuid "90578cc8-e6e3-49be-ac14-3b87c36cf7fa")
 		)
 		(pad "2" thru_hole circle
 			(at 0 4.5 90)
@@ -2346,7 +2346,7 @@
 			(net 1 "GND")
 			(pinfunction "2")
 			(pintype "passive")
-			(uuid "84b96120-2b59-4f40-8c1a-a29c781c495b")
+			(uuid "d9107076-810e-46f9-bbba-b923bcad1894")
 		)
 		(embedded_fonts no)
 		(model "${KICAD9_3DMODEL_DIR}/Button_Switch_THT.3dshapes/SW_PUSH_6mm.step"
@@ -2712,7 +2712,7 @@
 	(footprint "Button_Switch_THT:SW_PUSH_6mm"
 		(layer "F.Cu")
 		(uuid "bc636477-a171-49a1-9808-f506e12e35df")
-		(at 98.5 93.5)
+		(at 98.5 98.5)
 		(descr "Generic 6mm SW tactile push button")
 		(tags "tact sw push 6mm")
 		(property "Reference" "Button3"
@@ -3019,7 +3019,7 @@
 			(net 5 "Net-(ESP_Right1-Pin_7)")
 			(pinfunction "1")
 			(pintype "passive")
-			(uuid "264082df-15ad-480b-8313-7280f8cb20a1")
+			(uuid "3493d070-9d13-42b8-ab2f-f8a93524a7b6")
 		)
 		(pad "2" thru_hole circle
 			(at 0 4.5 90)
@@ -3041,7 +3041,7 @@
 			(net 1 "GND")
 			(pinfunction "2")
 			(pintype "passive")
-			(uuid "06f97eb0-38d6-47ad-aee6-8c5c2eabdf82")
+			(uuid "766eefe2-2ba4-4bb7-af8f-b42157f613d0")
 		)
 		(embedded_fonts no)
 		(model "${KICAD9_3DMODEL_DIR}/Button_Switch_THT.3dshapes/SW_PUSH_6mm.step"
@@ -4753,7 +4753,7 @@
 	)
 	(gr_rect
 		(start 57 23.88)
-		(end 122 102.88)
+		(end 122 106.88)
 		(stroke
 			(width 0.15)
 			(type default)
