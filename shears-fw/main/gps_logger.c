@@ -4,22 +4,23 @@
  * GPS NMEA logger for the shears firmware.
  *
  * Responsibilities:
- *   - mount SPIFFS and ensure gps_points.csv exists with a header
  *   - configure UART2 for 115200 baud NMEA input
  *   - keep the most recent full NMEA sentence in latestNmea[]
  *   - accept save requests from a GPIO button or gpsLoggerRequestSave()
- *   - on save, parse $GNGGA and append one CSV row
+ *   - on save, append one $GNGGA row to gps_points.csv
+ *
+ * Note:
+ *   - SPIFFS is mounted elsewhere (app_main). This module only uses the filesystem.
  */
 
 #include "gps_logger.h"
 #include "shears_piezo.h"
 #include "shears_primeSwitch.h"
 #include "shears_gpsButtons.h"
+#include "shears_gpsStorage.h"
 
 #include <stdint.h>
 #include <string.h>
-#include <stdio.h>
-#include <stdlib.h>
 
 #include "driver/uart.h"
 #include "driver/gpio.h"
@@ -29,9 +30,6 @@
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-
-#include "esp_spiffs.h"
-#include "esp_err.h"
 
 #include "log_paths.h"
 
@@ -51,7 +49,6 @@ static const char *TAG = "gps_logger";
 static char latestNmea[GPS_BUF_SIZE];
 
 static volatile bool nmeaValid = false;
-
 static volatile bool saveRequestedFlag = false;
 
 static volatile bool clearRequestedFlag = false;
@@ -67,12 +64,6 @@ static volatile bool captureNextGGA = false;
 
 static void uartReadTask(void *arg);
 static void saveTask(void *arg);
-static void initSpiffs(void);
-static double nmeaToDecimal(const char *nmea_val, char hemisphere);
-static void storeGgaCsv(const char *nmea);
-static void printCsvFile(void);
-static void formatUtcTime(const char *nmeaUtc, char *out, size_t outLen);
-static void clearCSV(void);
 static void requestCutFeedback(void);
 
 /* ISR callbacks (wired up by shears_gpsButtons) */
@@ -84,7 +75,6 @@ static void IRAM_ATTR onPrimeLevel(int level)
 {
 	shearsPrimeSwitchUpdateFromLevel(level);
 
-	/* If we just went SAFE, kill any pending capture. */
 	if (shearsPrimeSwitchConsumeUnprimedEdge()) {
 		captureNextGGA = false;
 	}
@@ -92,7 +82,6 @@ static void IRAM_ATTR onPrimeLevel(int level)
 
 static void IRAM_ATTR onGpsButtonLevel(int level)
 {
-	/* Button press starts hold timer; release decides short vs long action. */
 	if (level == 0) {
 		buttonPressTimeUs = esp_timer_get_time();
 		gpsButtonHeld = true;
@@ -106,7 +95,6 @@ static void IRAM_ATTR onGpsButtonLevel(int level)
 	gpsButtonHeld = false;
 	clearTriggered = false;
 
-	/* short press -> capture (only when primed) */
 	if (timeDiff < CLEAR_HOLD_US) {
 		if (shearsPrimeSwitchIsPrimed() && !captureNextGGA) {
 			captureNextGGA = true;
@@ -150,12 +138,10 @@ static void uartReadTask(void *arg)
 				if (c == '\n') {
 					nmea_buf[nmea_len] = '\0';
 
-					/* if short-press requested a capture, check if this is GGA */
 					if (captureNextGGA && strncmp(nmea_buf, "$GNGGA,", 7) == 0) {
 						strncpy(latestNmea, nmea_buf, GPS_BUF_SIZE);
 						nmeaValid = true;
 
-						/* disarm the capture and request save */
 						captureNextGGA = false;
 						saveRequestedFlag = true;
 					}
@@ -169,241 +155,9 @@ static void uartReadTask(void *arg)
 	}
 }
 
-static double nmeaToDecimal(const char *nmea_val, char hemisphere)
-{
-	double val = atof(nmea_val);
-	int degrees = (int)(val / 100);
-	double minutes = val - (degrees * 100);
-	double decimal = degrees + minutes / 60.0;
-
-	if (hemisphere == 'S' || hemisphere == 'W') {
-		decimal *= -1;
-	}
-
-	return decimal;
-}
-
-static void clearCSV(void)
-{
-	FILE *f = fopen(GPS_LOG_FILE_PATH, "w");
-	if (!f) {
-		ESP_LOGE(TAG, "Could not open file to clear CSV");
-		return;
-	}
-
-	fprintf(f,
-	        "utc_time,latitude,longitude,fix_quality,"
-	        "num_satellites,hdop,altitude,geoid_height\n");
-	fclose(f);
-	ESP_LOGW(TAG, "GPS CSV cleared");
-}
-
-static void storeGgaCsv(const char *nmea)
-{
-	if (strncmp(nmea, "$GNGGA,", 7) != 0) {
-		return;
-	}
-
-	char copy[GPS_BUF_SIZE];
-	strncpy(copy, nmea, GPS_BUF_SIZE);
-
-	char *tokens[20];
-	int i = 0;
-	char *tok = strtok(copy, ",");
-
-	while (tok != NULL && i < 20) {
-		tokens[i++] = tok;
-		tok = strtok(NULL, ",");
-	}
-
-	if (i < 12) {
-		ESP_LOGW(TAG, "GNGGA sentence too short, i=%d", i);
-		return;
-	}
-
-	const char *utc_time = tokens[1];
-	double lat = nmeaToDecimal(tokens[2], tokens[3][0]);
-	double lon = nmeaToDecimal(tokens[4], tokens[5][0]);
-	int fix = atoi(tokens[6]);
-	int num_sats = atoi(tokens[7]);
-	double hdop = atof(tokens[8]);
-	double altitude = atof(tokens[9]);
-	double geoid_height = atof(tokens[11]);
-
-	FILE *f = fopen(GPS_LOG_FILE_PATH, "a");
-	if (!f) {
-		ESP_LOGE(TAG, "Error opening CSV for append");
-		return;
-	}
-
-	fprintf(f, "%s,%.7f,%.7f,%d,%d,%.1f,%.3f,%.3f\n",
-	        utc_time,
-	        lat,
-	        lon,
-	        fix,
-	        num_sats,
-	        hdop,
-	        altitude,
-	        geoid_height);
-
-	fclose(f);
-
-	ESP_LOGI(TAG, "GPS point saved: time=%s lat=%.7f lon=%.7f",
-	         utc_time, lat, lon);
-}
-
 static void requestCutFeedback(void)
 {
 	cutBeepCount++;
-}
-
-static void printCsvFile(void)
-{
-	FILE *f = fopen(GPS_LOG_FILE_PATH, "r");
-	if (!f) {
-		ESP_LOGE(TAG, "Could not open CSV file for read");
-		return;
-	}
-
-#define MAX_LINES 5
-#define LINE_BUF  256
-
-	char header[LINE_BUF] = {0};
-
-	char lines[MAX_LINES][LINE_BUF];
-	int lineNums[MAX_LINES];
-
-	int dataLinesSeen = 0;
-	char buffer[LINE_BUF];
-
-	/* read header */
-	if (!fgets(header, sizeof(header), f)) {
-		fclose(f);
-		ESP_LOGW(TAG, "CSV file is empty");
-		return;
-	}
-
-	/* read data rows */
-	while (fgets(buffer, sizeof(buffer), f)) {
-		int idx = dataLinesSeen % MAX_LINES;
-
-		strncpy(lines[idx], buffer, sizeof(lines[idx]) - 1);
-		lines[idx][sizeof(lines[idx]) - 1] = '\0';
-
-		/* header line is line 1, first data row is line 2 */
-		lineNums[idx] = dataLinesSeen + 1;
-
-		dataLinesSeen++;
-	}
-
-	fclose(f);
-
-	ESP_LOGI(TAG, "---- Newest GPS Data Points ----");
-
-	if (dataLinesSeen == 0) {
-		ESP_LOGI(TAG, "(no data rows yet)");
-		return;
-	}
-
-	printf("\n");
-	printf("line | %-11s | %-11s | %-12s | %-3s | %-4s | %-4s | %-8s | %-11s\n",
-	       "utc_time", "latitude", "longitude", "fix", "sats", "hdop", "alt(m)", "geoid(m)");
-	printf("-----+-------------+-------------+--------------+-----+------+------+-"
-	       "----------+------------\n");
-
-	int linesToPrint = (dataLinesSeen < MAX_LINES) ? dataLinesSeen : MAX_LINES;
-	int start = (dataLinesSeen >= MAX_LINES) ? (dataLinesSeen % MAX_LINES) : 0;
-
-	for (int i = 0; i < linesToPrint; i++) {
-		int idx = (start + i) % MAX_LINES;
-
-		char row[LINE_BUF];
-		strncpy(row, lines[idx], sizeof(row) - 1);
-		row[sizeof(row) - 1] = '\0';
-
-		size_t len = strlen(row);
-		if (len > 0 && row[len - 1] == '\n') {
-			row[len - 1] = '\0';
-		}
-
-		char *tokens[8] = {0};
-		int t = 0;
-
-		char *tok = strtok(row, ",");
-		while (tok != NULL && t < 8) {
-			tokens[t++] = tok;
-			tok = strtok(NULL, ",");
-		}
-
-		if (t < 8) {
-			printf("%4d | (malformed) %s\n", lineNums[idx], lines[idx]);
-			continue;
-		}
-
-		char timeFmt[16];
-		formatUtcTime(tokens[0], timeFmt, sizeof(timeFmt));
-
-		printf("%4d | %-10s | %11s | %12s | %3s | %4s | %4s | %8s | %11s\n",
-		       lineNums[idx],
-		       timeFmt,
-		       tokens[1], /* latitude */
-		       tokens[2], /* longitude */
-		       tokens[3], /* fix_quality */
-		       tokens[4], /* num_satellites */
-		       tokens[5], /* hdop */
-		       tokens[6], /* altitude */
-		       tokens[7]  /* geoid_height */
-		);
-	}
-
-	printf("\n");
-}
-
-static void initSpiffs(void)
-{
-	esp_vfs_spiffs_conf_t conf = {
-		.base_path              = "/spiffs",
-		.partition_label        = "storage",
-		.max_files              = 5,
-		.format_if_mount_failed = true
-	};
-
-	esp_err_t ret = esp_vfs_spiffs_register(&conf);
-	if (ret != ESP_OK) {
-		if (ret == ESP_FAIL) {
-			ESP_LOGE(TAG, "Failed to mount or format SPIFFS");
-		} else if (ret == ESP_ERR_NOT_FOUND) {
-			ESP_LOGE(TAG, "SPIFFS partition not found");
-		} else {
-			ESP_LOGE(TAG, "SPIFFS init error (%s)", esp_err_to_name(ret));
-		}
-		return;
-	}
-
-	size_t total = 0, used = 0;
-	ret = esp_spiffs_info(conf.partition_label, &total, &used);
-	if (ret == ESP_OK) {
-		ESP_LOGI(TAG, "SPIFFS mounted: total=%u, used=%u",
-		         (unsigned)total, (unsigned)used);
-	} else {
-		ESP_LOGW(TAG, "SPIFFS info failed (%s)", esp_err_to_name(ret));
-	}
-
-	FILE *f = fopen(GPS_LOG_FILE_PATH, "r");
-	if (!f) {
-		f = fopen(GPS_LOG_FILE_PATH, "w");
-		if (f) {
-			fprintf(f,
-			        "utc_time,latitude,longitude,fix_quality,"
-			        "num_satellites,hdop,altitude,geoid_height\n");
-			fclose(f);
-			ESP_LOGI(TAG, "Created gps_points.csv with header");
-		} else {
-			ESP_LOGE(TAG, "Failed to create gps_points.csv");
-		}
-	} else {
-		fclose(f);
-	}
 }
 
 static void saveTask(void *arg)
@@ -427,7 +181,9 @@ static void saveTask(void *arg)
 
 		if (clearRequestedFlag) {
 			clearRequestedFlag = false;
-			clearCSV();
+
+			shearsGpsStorageClearCsv(GPS_LOG_FILE_PATH);
+
 			memset(latestNmea, 0, sizeof(latestNmea));
 			nmeaValid = false;
 
@@ -440,16 +196,18 @@ static void saveTask(void *arg)
 
 			if (nmeaValid) {
 				ESP_LOGI(TAG, "Save requested; latest NMEA: %s", latestNmea);
-				storeGgaCsv(latestNmea);
+
+				shearsGpsStorageAppendGngga(GPS_LOG_FILE_PATH, latestNmea);
+
 				nmeaValid = false;
 				memset(latestNmea, 0, sizeof(latestNmea));
-				printCsvFile();
+
+				shearsGpsStoragePrintNewest(GPS_LOG_FILE_PATH, 5);
 			} else {
 				ESP_LOGW(TAG, "Save requested but no valid NMEA data available");
 			}
 		}
 
-		/* Beep once per SAFE->PRIMED transition. */
 		if (shearsPrimeSwitchConsumePrimedEdge()) {
 			shearsPiezoBeepPattern(3);
 		}
@@ -481,7 +239,8 @@ static void saveTask(void *arg)
 
 void gpsLoggerInit(void)
 {
-	initSpiffs();
+	/* SPIFFS is mounted outside this module. Just ensure our file exists. */
+	shearsGpsStorageEnsureCsvExists(GPS_LOG_FILE_PATH);
 
 	uart_config_t uart_config = {
 		.baud_rate = 115200,
@@ -501,7 +260,6 @@ void gpsLoggerInit(void)
 
 	ESP_LOGI(TAG, "UART2 configured for GPS at 115200 baud");
 
-	/* Prime switch startup state */
 	shearsPrimeSwitchInit(gpio_get_level(SHEARS_PRIME_BUTTON_PIN));
 
 	shearsGpsButtonsCallbacks_t callbacks = {
@@ -544,21 +302,5 @@ void gpsLoggerRequestSave(void)
 
 void gpsLoggerPrintCsv(void)
 {
-	printCsvFile();
-}
-
-static void formatUtcTime(const char *nmeaUtc, char *out, size_t outLen)
-{
-	if (!nmeaUtc || strlen(nmeaUtc) < 6) {
-		snprintf(out, outLen, "--:--:--");
-		return;
-	}
-
-	char hh[3] = { nmeaUtc[0], nmeaUtc[1], '\0' };
-	char mm[3] = { nmeaUtc[2], nmeaUtc[3], '\0' };
-	char ss[16];
-
-	snprintf(ss, sizeof(ss), "%s", nmeaUtc + 4);
-
-	snprintf(out, outLen, "%s:%s:%s", hh, mm, ss);
+	shearsGpsStoragePrintNewest(GPS_LOG_FILE_PATH, 5);
 }

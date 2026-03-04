@@ -14,6 +14,7 @@
 
 #include "shears_led.h"
 #include "shears_ble.h"
+#include "shears_spiffs.h"
 #include "gps_logger.h"
 
 /* --- BLE connection state ------------------------------------------------- */
@@ -40,6 +41,7 @@ void app_main(void)
 	shearsLedSetBlinking(true);
 
 	/* Start GPS logging subsystem. */
+	shearsSpiffsInit();
 	gpsLoggerInit();
 
 	/* Start BLE peripheral mode and begin advertising. */
