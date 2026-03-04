@@ -14,6 +14,7 @@
 #include "gps_logger.h"
 #include "shears_piezo.h"
 #include "shears_primeSwitch.h"
+#include "shears_gpsButtons.h"
 
 #include <stdint.h>
 #include <string.h>
@@ -32,18 +33,12 @@
 #include "esp_spiffs.h"
 #include "esp_err.h"
 
-#include "hal/gpio_types.h"
 #include "log_paths.h"
 
 #define GPS_UART_NUM   UART_NUM_2
 #define GPS_UART_RX    GPIO_NUM_16
 #define GPS_UART_TX    GPIO_NUM_17
 #define GPS_BUF_SIZE   512
-
-#define GPS_BUTTON_PIN    GPIO_NUM_23
-#define PRIME_BUTTON_PIN  GPIO_NUM_22
-#define CUT2_BUTTON_PIN   GPIO_NUM_19
-#define CUT3_BUTTON_PIN   GPIO_NUM_18
 
 #define LED_STATUS_PIN      GPIO_NUM_25
 
@@ -70,7 +65,6 @@ static volatile bool clearTriggered = false;
 
 static volatile bool captureNextGGA = false;
 
-static void buttonIsrHandler(void *arg);
 static void uartReadTask(void *arg);
 static void saveTask(void *arg);
 static void initSpiffs(void);
@@ -81,53 +75,53 @@ static void formatUtcTime(const char *nmeaUtc, char *out, size_t outLen);
 static void clearCSV(void);
 static void requestCutFeedback(void);
 
-static void IRAM_ATTR buttonIsrHandler(void *arg)
+/* ISR callbacks (wired up by shears_gpsButtons) */
+static void onPrimeLevel(int level);
+static void onGpsButtonLevel(int level);
+static void onCutPress(gpio_num_t pin);
+
+static void IRAM_ATTR onPrimeLevel(int level)
 {
-	gpio_num_t pin = (gpio_num_t)(intptr_t)arg;
+	shearsPrimeSwitchUpdateFromLevel(level);
 
-	int level = gpio_get_level(pin);
-
-	if (pin == PRIME_BUTTON_PIN) {
-		// Prime switch is level-based, not press-based.
-		shearsPrimeSwitchUpdateFromLevel(level);
-
-		// If we just went SAFE, kill any pending capture.
-		if (shearsPrimeSwitchConsumeUnprimedEdge()) {
-			captureNextGGA = false;
-		}
-		return;
+	/* If we just went SAFE, kill any pending capture. */
+	if (shearsPrimeSwitchConsumeUnprimedEdge()) {
+		captureNextGGA = false;
 	}
+}
 
-	if (pin == GPS_BUTTON_PIN) {
-		// Button press starts hold timer; release decides short vs long action.
-		if (level == 0) {
-			buttonPressTimeUs = esp_timer_get_time();
-			gpsButtonHeld = true;
-			clearTriggered = false;
-			return;
-		}
-
-		int64_t nowTime = esp_timer_get_time();
-		int64_t timeDiff = nowTime - buttonPressTimeUs;
-
-		gpsButtonHeld = false;
+static void IRAM_ATTR onGpsButtonLevel(int level)
+{
+	/* Button press starts hold timer; release decides short vs long action. */
+	if (level == 0) {
+		buttonPressTimeUs = esp_timer_get_time();
+		gpsButtonHeld = true;
 		clearTriggered = false;
-
-		// short press -> capture (only when primed)
-		if (timeDiff < CLEAR_HOLD_US) {
-			if (shearsPrimeSwitchIsPrimed() && !captureNextGGA) {
-				captureNextGGA = true;
-				requestCutFeedback();
-			}
-		}
 		return;
 	}
 
-	if ((pin == CUT2_BUTTON_PIN || pin == CUT3_BUTTON_PIN) && level == 0) {
+	int64_t nowTime = esp_timer_get_time();
+	int64_t timeDiff = nowTime - buttonPressTimeUs;
+
+	gpsButtonHeld = false;
+	clearTriggered = false;
+
+	/* short press -> capture (only when primed) */
+	if (timeDiff < CLEAR_HOLD_US) {
 		if (shearsPrimeSwitchIsPrimed() && !captureNextGGA) {
 			captureNextGGA = true;
 			requestCutFeedback();
 		}
+	}
+}
+
+static void IRAM_ATTR onCutPress(gpio_num_t pin)
+{
+	(void)pin;
+
+	if (shearsPrimeSwitchIsPrimed() && !captureNextGGA) {
+		captureNextGGA = true;
+		requestCutFeedback();
 	}
 }
 
@@ -156,12 +150,12 @@ static void uartReadTask(void *arg)
 				if (c == '\n') {
 					nmea_buf[nmea_len] = '\0';
 
-					// if short-press requested a capture, check if this is GGA
+					/* if short-press requested a capture, check if this is GGA */
 					if (captureNextGGA && strncmp(nmea_buf, "$GNGGA,", 7) == 0) {
 						strncpy(latestNmea, nmea_buf, GPS_BUF_SIZE);
 						nmeaValid = true;
 
-						// disarm the capture and request save
+						/* disarm the capture and request save */
 						captureNextGGA = false;
 						saveRequestedFlag = true;
 					}
@@ -282,21 +276,21 @@ static void printCsvFile(void)
 	int dataLinesSeen = 0;
 	char buffer[LINE_BUF];
 
-	// read header
+	/* read header */
 	if (!fgets(header, sizeof(header), f)) {
 		fclose(f);
 		ESP_LOGW(TAG, "CSV file is empty");
 		return;
 	}
 
-	// read data rows
+	/* read data rows */
 	while (fgets(buffer, sizeof(buffer), f)) {
 		int idx = dataLinesSeen % MAX_LINES;
 
 		strncpy(lines[idx], buffer, sizeof(lines[idx]) - 1);
 		lines[idx][sizeof(lines[idx]) - 1] = '\0';
 
-		// header line is line 1, first data row is line 2
+		/* header line is line 1, first data row is line 2 */
 		lineNums[idx] = dataLinesSeen + 1;
 
 		dataLinesSeen++;
@@ -455,7 +449,7 @@ static void saveTask(void *arg)
 			}
 		}
 
-		// Beep once per SAFE->PRIMED transition.
+		/* Beep once per SAFE->PRIMED transition. */
 		if (shearsPrimeSwitchConsumePrimedEdge()) {
 			shearsPiezoBeepPattern(3);
 		}
@@ -507,21 +501,15 @@ void gpsLoggerInit(void)
 
 	ESP_LOGI(TAG, "UART2 configured for GPS at 115200 baud");
 
-	gpio_config_t io_conf = {
-		.pin_bit_mask = (1ULL << GPS_BUTTON_PIN) |
-		                (1ULL << PRIME_BUTTON_PIN) |
-		                (1ULL << CUT2_BUTTON_PIN) |
-		                (1ULL << CUT3_BUTTON_PIN),
-		.mode         = GPIO_MODE_INPUT,
-		.pull_up_en   = 1,
-		.pull_down_en = 0,
-		.intr_type    = GPIO_INTR_ANYEDGE
+	/* Prime switch startup state */
+	shearsPrimeSwitchInit(gpio_get_level(SHEARS_PRIME_BUTTON_PIN));
+
+	shearsGpsButtonsCallbacks_t callbacks = {
+		.onPrimeLevel = onPrimeLevel,
+		.onGpsButtonLevel = onGpsButtonLevel,
+		.onCutPress = onCutPress
 	};
-
-	gpio_config(&io_conf);
-
-	int primeLevel = gpio_get_level(PRIME_BUTTON_PIN);
-	shearsPrimeSwitchInit(primeLevel);
+	shearsGpsButtonsInit(&callbacks);
 
 	gpio_config_t out_conf = {
 		.pin_bit_mask = (1ULL << LED_STATUS_PIN),
@@ -535,16 +523,10 @@ void gpsLoggerInit(void)
 
 	shearsPiezoInit();
 
-	gpio_install_isr_service(0);
-	gpio_isr_handler_add(GPS_BUTTON_PIN, buttonIsrHandler, (void *)(intptr_t)GPS_BUTTON_PIN);
-	gpio_isr_handler_add(PRIME_BUTTON_PIN, buttonIsrHandler, (void *)(intptr_t)PRIME_BUTTON_PIN);
-	gpio_isr_handler_add(CUT2_BUTTON_PIN, buttonIsrHandler, (void *)(intptr_t)CUT2_BUTTON_PIN);
-	gpio_isr_handler_add(CUT3_BUTTON_PIN, buttonIsrHandler, (void *)(intptr_t)CUT3_BUTTON_PIN);
-
 	bool primed = shearsPrimeSwitchIsPrimed();
 
 	ESP_LOGI(TAG, "Input interrupts configured on GPS=%d PRIME=%d CUT2=%d CUT3=%d",
-	         GPS_BUTTON_PIN, PRIME_BUTTON_PIN, CUT2_BUTTON_PIN, CUT3_BUTTON_PIN);
+	         SHEARS_GPS_BUTTON_PIN, SHEARS_PRIME_BUTTON_PIN, SHEARS_CUT2_BUTTON_PIN, SHEARS_CUT3_BUTTON_PIN);
 	ESP_LOGI(TAG, "Prime switch startup state: %s", primed ? "PRIMED" : "SAFE");
 
 	xTaskCreate(uartReadTask, "gps_uart_read", 4096, NULL, 5, NULL);

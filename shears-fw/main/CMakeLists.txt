@@ -5,6 +5,7 @@ idf_component_register(
         "shears_ble.c"
         "shears_piezo.c"
         "shears_primeSwitch.c"
+        "shears_gpsButtons.c"
         "gps_logger.c"
         "log_transfer_server.c"
     INCLUDE_DIRS
