@@ -13,6 +13,7 @@
 
 #include "gps_logger.h"
 #include "shears_piezo.h"
+#include "shears_primeSwitch.h"
 
 #include <stdint.h>
 #include <string.h>
@@ -39,11 +40,10 @@
 #define GPS_UART_TX    GPIO_NUM_17
 #define GPS_BUF_SIZE   512
 
-#define GPS_BUTTON_PIN     GPIO_NUM_23
-#define PRIME_BUTTON_PIN   GPIO_NUM_22
-#define CUT2_BUTTON_PIN    GPIO_NUM_19
-#define CUT3_BUTTON_PIN    GPIO_NUM_18
-#define PRIME_ACTIVE_LEVEL 0
+#define GPS_BUTTON_PIN    GPIO_NUM_23
+#define PRIME_BUTTON_PIN  GPIO_NUM_22
+#define CUT2_BUTTON_PIN   GPIO_NUM_19
+#define CUT3_BUTTON_PIN   GPIO_NUM_18
 
 #define LED_STATUS_PIN      GPIO_NUM_25
 
@@ -62,8 +62,6 @@ static volatile bool saveRequestedFlag = false;
 static volatile bool clearRequestedFlag = false;
 static int64_t buttonPressTimeUs = 0;
 
-static volatile bool primed = false;
-static volatile bool primeBeepRequested = false;
 static volatile bool clearBeepRequested = false;
 static volatile int cutBeepCount = 0;
 
@@ -82,22 +80,6 @@ static void printCsvFile(void);
 static void formatUtcTime(const char *nmeaUtc, char *out, size_t outLen);
 static void clearCSV(void);
 static void requestCutFeedback(void);
-static void IRAM_ATTR updatePrimedStateFromLevel(int level);
-
-static void IRAM_ATTR updatePrimedStateFromLevel(int level)
-{
-	bool newPrimed = (level == PRIME_ACTIVE_LEVEL);
-	if (newPrimed == primed) {
-		return;
-	}
-
-	primed = newPrimed;
-	if (primed) {
-		primeBeepRequested = true;
-	} else {
-		captureNextGGA = false;
-	}
-}
 
 static void IRAM_ATTR buttonIsrHandler(void *arg)
 {
@@ -106,8 +88,13 @@ static void IRAM_ATTR buttonIsrHandler(void *arg)
 	int level = gpio_get_level(pin);
 
 	if (pin == PRIME_BUTTON_PIN) {
-		// SPDT switch: primed state follows stable pin level.
-		updatePrimedStateFromLevel(level);
+		// Prime switch is level-based, not press-based.
+		shearsPrimeSwitchUpdateFromLevel(level);
+
+		// If we just went SAFE, kill any pending capture.
+		if (shearsPrimeSwitchConsumeUnprimedEdge()) {
+			captureNextGGA = false;
+		}
 		return;
 	}
 
@@ -128,7 +115,7 @@ static void IRAM_ATTR buttonIsrHandler(void *arg)
 
 		// short press -> capture (only when primed)
 		if (timeDiff < CLEAR_HOLD_US) {
-			if (primed && !captureNextGGA) {
+			if (shearsPrimeSwitchIsPrimed() && !captureNextGGA) {
 				captureNextGGA = true;
 				requestCutFeedback();
 			}
@@ -137,7 +124,7 @@ static void IRAM_ATTR buttonIsrHandler(void *arg)
 	}
 
 	if ((pin == CUT2_BUTTON_PIN || pin == CUT3_BUTTON_PIN) && level == 0) {
-		if (primed && !captureNextGGA) {
+		if (shearsPrimeSwitchIsPrimed() && !captureNextGGA) {
 			captureNextGGA = true;
 			requestCutFeedback();
 		}
@@ -433,6 +420,8 @@ static void saveTask(void *arg)
 		static int64_t lastBlinkUs = 0;
 		static bool ledOn = true;
 
+		bool primed = shearsPrimeSwitchIsPrimed();
+
 		if (gpsButtonHeld && !primed && !clearTriggered) {
 			int64_t nowUs = esp_timer_get_time();
 			if ((nowUs - buttonPressTimeUs) >= CLEAR_HOLD_US) {
@@ -466,8 +455,8 @@ static void saveTask(void *arg)
 			}
 		}
 
-		if (primeBeepRequested) {
-			primeBeepRequested = false;
+		// Beep once per SAFE->PRIMED transition.
+		if (shearsPrimeSwitchConsumePrimedEdge()) {
 			shearsPiezoBeepPattern(3);
 		}
 
@@ -530,8 +519,9 @@ void gpsLoggerInit(void)
 	};
 
 	gpio_config(&io_conf);
-	updatePrimedStateFromLevel(gpio_get_level(PRIME_BUTTON_PIN));
-	primeBeepRequested = false;
+
+	int primeLevel = gpio_get_level(PRIME_BUTTON_PIN);
+	shearsPrimeSwitchInit(primeLevel);
 
 	gpio_config_t out_conf = {
 		.pin_bit_mask = (1ULL << LED_STATUS_PIN),
@@ -550,6 +540,8 @@ void gpsLoggerInit(void)
 	gpio_isr_handler_add(PRIME_BUTTON_PIN, buttonIsrHandler, (void *)(intptr_t)PRIME_BUTTON_PIN);
 	gpio_isr_handler_add(CUT2_BUTTON_PIN, buttonIsrHandler, (void *)(intptr_t)CUT2_BUTTON_PIN);
 	gpio_isr_handler_add(CUT3_BUTTON_PIN, buttonIsrHandler, (void *)(intptr_t)CUT3_BUTTON_PIN);
+
+	bool primed = shearsPrimeSwitchIsPrimed();
 
 	ESP_LOGI(TAG, "Input interrupts configured on GPS=%d PRIME=%d CUT2=%d CUT3=%d",
 	         GPS_BUTTON_PIN, PRIME_BUTTON_PIN, CUT2_BUTTON_PIN, CUT3_BUTTON_PIN);
