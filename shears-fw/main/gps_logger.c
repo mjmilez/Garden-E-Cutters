@@ -41,7 +41,7 @@
 #define LED_STATUS_PIN      GPIO_NUM_25
 
 #define CLEAR_HOLD_US         5000000
-#define TRIGGER_DEBOUNCE_US   75000
+#define TRIGGER_DEBOUNCE_US   400000
 #define LED_BLINK_ON_MS       200
 #define LED_BLINK_OFF_MS      200
 
