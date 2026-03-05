@@ -484,13 +484,13 @@
   },
   "pcbnew": {
     "last_paths": {
-      "gencad": "",
+      "gencad": "output_files/cad/pcb.cad",
       "idf": "",
       "netlist": "",
-      "plot": "",
+      "plot": "output_files/gerber/",
       "pos_files": "",
       "specctra_dsn": "",
-      "step": "",
+      "step": "output_files/cad/pcb.stl",
       "svg": "",
       "vrml": ""
     },
