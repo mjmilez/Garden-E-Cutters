@@ -41,6 +41,7 @@
 #define LED_STATUS_PIN      GPIO_NUM_25
 
 #define CLEAR_HOLD_US         5000000
+#define TRIGGER_DEBOUNCE_US   75000
 #define LED_BLINK_ON_MS       200
 #define LED_BLINK_OFF_MS      200
 
@@ -61,10 +62,12 @@ static volatile bool gpsButtonHeld = false;
 static volatile bool clearTriggered = false;
 
 static volatile bool captureNextGGA = false;
+static volatile int64_t lastTriggerPressUs = 0;
 
 static void uartReadTask(void *arg);
 static void saveTask(void *arg);
 static void requestCutFeedback(void);
+static bool IRAM_ATTR registerTriggerPress(void);
 
 /* ISR callbacks (wired up by shears_gpsButtons) */
 static void onPrimeLevel(int level);
@@ -78,6 +81,17 @@ static void IRAM_ATTR onPrimeLevel(int level)
 	if (shearsPrimeSwitchConsumeUnprimedEdge()) {
 		captureNextGGA = false;
 	}
+}
+
+static bool IRAM_ATTR registerTriggerPress(void)
+{
+	int64_t nowUs = esp_timer_get_time();
+	if ((nowUs - lastTriggerPressUs) < TRIGGER_DEBOUNCE_US) {
+		return false;
+	}
+
+	lastTriggerPressUs = nowUs;
+	return true;
 }
 
 static void IRAM_ATTR onGpsButtonLevel(int level)
@@ -97,8 +111,10 @@ static void IRAM_ATTR onGpsButtonLevel(int level)
 
 	if (timeDiff < CLEAR_HOLD_US) {
 		if (shearsPrimeSwitchIsPrimed() && !captureNextGGA) {
-			captureNextGGA = true;
-			requestCutFeedback();
+			if (registerTriggerPress()) {
+				captureNextGGA = true;
+				requestCutFeedback();
+			}
 		}
 	}
 }
@@ -108,8 +124,10 @@ static void IRAM_ATTR onCutPress(gpio_num_t pin)
 	(void)pin;
 
 	if (shearsPrimeSwitchIsPrimed() && !captureNextGGA) {
-		captureNextGGA = true;
-		requestCutFeedback();
+		if (registerTriggerPress()) {
+			captureNextGGA = true;
+			requestCutFeedback();
+		}
 	}
 }
 
