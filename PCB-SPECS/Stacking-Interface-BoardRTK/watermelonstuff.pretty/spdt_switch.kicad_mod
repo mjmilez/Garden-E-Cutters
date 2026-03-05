@@ -1,0 +1,108 @@
+(footprint "spdt_switch"
+	(version 20241229)
+	(generator "pcbnew")
+	(generator_version "9.0")
+	(layer "F.Cu")
+	(property "Reference" "REF**"
+		(at 0.05 -1.541 0)
+		(unlocked yes)
+		(layer "F.SilkS")
+		(hide yes)
+		(uuid "ac2f7fc3-7711-48fa-9848-8303b53a3852")
+		(effects
+			(font
+				(size 1 1)
+				(thickness 0.1)
+			)
+		)
+	)
+	(property "Value" "spdt_switch"
+		(at 0.05 -0.041 0)
+		(unlocked yes)
+		(layer "F.Fab")
+		(uuid "ba856e3c-1e74-47ef-b9f2-a0adf1999969")
+		(effects
+			(font
+				(size 1 1)
+				(thickness 0.15)
+			)
+		)
+	)
+	(property "Datasheet" ""
+		(at 0 0 0)
+		(unlocked yes)
+		(layer "F.Fab")
+		(hide yes)
+		(uuid "40275d1d-add8-48f0-a6f8-8bb148281022")
+		(effects
+			(font
+				(size 1 1)
+				(thickness 0.15)
+			)
+		)
+	)
+	(property "Description" ""
+		(at 0 0 0)
+		(unlocked yes)
+		(layer "F.Fab")
+		(hide yes)
+		(uuid "f8215066-72c6-482e-9d43-8828f72d72c6")
+		(effects
+			(font
+				(size 1 1)
+				(thickness 0.15)
+			)
+		)
+	)
+	(attr through_hole)
+	(fp_rect
+		(start -6.35 -3.43)
+		(end 6.35 3.43)
+		(stroke
+			(width 0.1)
+			(type solid)
+		)
+		(fill no)
+		(layer "F.SilkS")
+		(uuid "55c06646-67cd-4732-802f-9688cf31cd31")
+	)
+	(fp_text user "${REFERENCE}"
+		(at 0.05 1.459 0)
+		(unlocked yes)
+		(layer "F.Fab")
+		(uuid "cede57cd-4a30-4b69-a77c-35f51ed6f27c")
+		(effects
+			(font
+				(size 1 1)
+				(thickness 0.15)
+			)
+		)
+	)
+	(pad "1" thru_hole roundrect
+		(at 4.7 0 90)
+		(size 3 1.27)
+		(drill oval 2.5 0.9)
+		(layers "*.Cu" "*.Mask")
+		(remove_unused_layers no)
+		(roundrect_rratio 0.15)
+		(uuid "9c9a51d9-ad24-4f09-ad95-20236cdd1db1")
+	)
+	(pad "2" thru_hole roundrect
+		(at 0 0 90)
+		(size 3 1.27)
+		(drill oval 2.5 0.9)
+		(layers "*.Cu" "*.Mask")
+		(remove_unused_layers no)
+		(roundrect_rratio 0.15)
+		(uuid "89e199ba-72a3-477b-96ff-cff9ac24ce22")
+	)
+	(pad "3" thru_hole oval
+		(at -4.7 0 90)
+		(size 3 1.27)
+		(drill oval 2.5 0.9)
+		(layers "*.Cu" "*.Mask")
+		(remove_unused_layers no)
+		(uuid "6022a3fe-ec06-41ab-8dac-e207bf61d363")
+	)
+	(embedded_fonts no)
+)
