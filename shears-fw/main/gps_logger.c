@@ -50,6 +50,7 @@
 #define PIEZO_PIN_B       GPIO_NUM_5
 
 #define CLEAR_HOLD_US         5000000
+#define TRIGGER_DEBOUNCE_US   400000
 #define BEEP_ON_MS            80
 #define BEEP_OFF_MS           80
 #define LED_BLINK_ON_MS       200
@@ -83,6 +84,9 @@ static volatile bool gpsButtonHeld = false;
 static volatile bool clearTriggered = false;
 
 static volatile bool captureNextGGA=false;
+static volatile uint32_t triggerPressCount = 0;
+static volatile int64_t lastTriggerPressUs = 0;
+static volatile bool triggerCountLogRequested = false;
 
 
 static void buttonIsrHandler(void *arg);
@@ -100,6 +104,19 @@ static void piezoInit(void);
 static void piezoSet(bool enable);
 static void toneDurationMs(uint32_t durationMs);
 static void IRAM_ATTR updatePrimedStateFromLevel(int level);
+static bool IRAM_ATTR registerTriggerPress(void);
+
+static bool IRAM_ATTR registerTriggerPress(void){
+  int64_t nowUs = esp_timer_get_time();
+  if ((nowUs - lastTriggerPressUs) < TRIGGER_DEBOUNCE_US) {
+    return false;
+  }
+
+  lastTriggerPressUs = nowUs;
+  triggerPressCount++;
+  triggerCountLogRequested = true;
+  return true;
+}
 
 static void IRAM_ATTR updatePrimedStateFromLevel(int level){
   bool newPrimed = (level == PRIME_ACTIVE_LEVEL);
@@ -144,8 +161,10 @@ static void IRAM_ATTR buttonIsrHandler(void *arg){
     // short press -> capture (only when primed)
     if (timeDiff < CLEAR_HOLD_US) {
       if (primed && !captureNextGGA) {
-        captureNextGGA = true;
-        requestCutFeedback();
+        if (registerTriggerPress()) {
+          captureNextGGA = true;
+          requestCutFeedback();
+        }
       }
     }
     return;
@@ -153,8 +172,10 @@ static void IRAM_ATTR buttonIsrHandler(void *arg){
 
   if ((pin == CUT2_BUTTON_PIN || pin == CUT3_BUTTON_PIN) && level == 0) {
     if (primed && !captureNextGGA) {
-      captureNextGGA = true;
-      requestCutFeedback();
+      if (registerTriggerPress()) {
+        captureNextGGA = true;
+        requestCutFeedback();
+      }
     }
   }
 }
@@ -562,6 +583,11 @@ static void saveTask(void *arg){
       int count = cutBeepCount;
       cutBeepCount = 0;
       beepPattern(count);
+    }
+
+    if (triggerCountLogRequested) {
+      triggerCountLogRequested = false;
+      ESP_LOGI(TAG, "Trigger presses: %lu", (unsigned long)triggerPressCount);
     }
 
     if (!primed) {
