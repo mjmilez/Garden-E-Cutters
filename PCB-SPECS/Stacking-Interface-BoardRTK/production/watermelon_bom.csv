@@ -1,0 +1,12 @@
+﻿Designator,Footprint,Quantity,Value,LCSC Part #
+"BUTTON1, BUTTON2",SW_PUSH_6mm,2,SW_Push,
+BZ1,Buzzer_D14mm_H7mm_P10mm,1,Buzzer,
+D1,LED_D1.8mm_W1.8mm_H2.4mm_Horizontal_O1.27mm_Z1.6mm,1,Blue,
+D2,LED_D1.8mm_W1.8mm_H2.4mm_Horizontal_O1.27mm_Z1.6mm,1,Green(Status),
+"ESP_LEFT1, ESP_RIGHT1",PinSocket_1x15_P2.54mm_Vertical,2,Conn_01x15_Socket,
+J1,TerminalBlock_Altech_AK300-2_P5.00mm,1,Screw_Terminal_01x02,
+PRIME_SWITCH1,spdt_switch,1,SW_SPDT,
+"R1, R2",R_Axial_DIN0207_L6.3mm_D2.5mm_P10.16mm_Horizontal,2,1k,
+RTK_BOTTOM_LEFT1,PinHeader_1x10_P2.54mm_Vertical,1,Conn_01x10_Pin,
+"RTK_BOTTOM_RIGHT1, RTK_TOP_LEFT1",PinHeader_1x08_P2.54mm_Vertical,2,Conn_01x08_Pin,
+RTK_TOP_RIGHT1,PinHeader_1x06_P2.54mm_Vertical,1,Conn_01x06_Pin,
