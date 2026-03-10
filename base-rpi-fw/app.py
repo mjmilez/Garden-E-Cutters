@@ -200,29 +200,28 @@ def api_clear():
 # ── Backwards-compatible aliases for Chris's existing frontend ─────
 # His app.js might still poll /api/cuts — these map to the same data.
 
-@app.route("/api/cuts", methods=["GET"])
+@app.route("/api/cuts", methods=["GET", "POST"])
 def api_cuts_compat():
-    """Alias for /api/points (backwards compat with Chris's frontend)."""
+    if request.method == "POST":
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "No JSON body provided"}), 400
+
+        lat = data.get('lat')
+        lng = data.get('lng')
+        timestamp = data.get('timestamp')
+
+        if lat is None or lng is None:
+            return jsonify({"error": "lat and lng are required"}), 400
+
+        try:
+            new_id = database.insert_cut(float(lat), float(lng), timestamp)
+            return jsonify({"success": True, "id": new_id}), 201
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+
+    # GET
     return api_points()
-
-@app.route("/api/cuts", methods=["POST"])
-def add_cut():
-    data = request.get_json()
-    if not data:
-        return jsonify({"error": "No JSON body provided"}), 400
-
-    lat = data.get('lat')
-    lng = data.get('lng')
-    timestamp = data.get('timestamp')  # optional
-
-    if lat is None or lng is None:
-        return jsonify({"error": "lat and lng are required"}), 400
-
-    try:
-        new_id = db.insert_cut(float(lat), float(lng), timestamp)
-        return jsonify({"success": True, "id": new_id}), 201
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
 
 
 # ── Entry point ────────────────────────────────────────────────────
