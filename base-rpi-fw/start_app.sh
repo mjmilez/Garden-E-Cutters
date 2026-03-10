@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-repoDir="/home/pi/garden-e-cutters/base-rpi-fw"
+repoDir="/home/pi/Garden-E-Cutters/base-rpi-fw"
 branchName="main"
 
 echo "[boot] entering repo directory..."
