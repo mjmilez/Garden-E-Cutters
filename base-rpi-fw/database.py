@@ -252,14 +252,19 @@ def purge_expired_deleted(hours=48):
 
 def insert_cut(lat, lng, timestamp=None):
     """Insert a single cut record. Returns the new row id."""
-    conn = get_db()
-    cursor = conn.cursor()
+    from datetime import datetime
     if timestamp is None:
-        from datetime import datetime
         timestamp = datetime.utcnow().isoformat()
-    cursor.execute(
-        "INSERT INTO cuts (lat, lng, timestamp) VALUES (?, ?, ?)",
-        (lat, lng, timestamp)
+
+    conn = get_connection()
+    cursor = conn.execute(
+        """INSERT INTO gps_points
+           (utc_time, latitude, longitude, fix_quality,
+            num_satellites, hdop, altitude, geoid_height)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+        (timestamp, lat, lng, 0, 0, 0.0, 0.0, 0.0)
     )
     conn.commit()
-    return cursor.lastrowid
+    new_id = cursor.lastrowid
+    conn.close()
+    return new_id
