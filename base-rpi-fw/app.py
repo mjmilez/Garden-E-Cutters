@@ -210,12 +210,18 @@ def api_cuts_compat():
         lat = data.get('lat')
         lng = data.get('lng')
         timestamp = data.get('timestamp')
+        hdop = data.get('hdop')
 
         if lat is None or lng is None:
             return jsonify({"error": "lat and lng are required"}), 400
 
         try:
-            new_id = database.insert_cut(float(lat), float(lng), timestamp)
+            new_id = database.insert_cut(
+                float(lat),
+                float(lng),
+                timestamp,
+                float(hdop) if hdop is not None else None,
+            )
             return jsonify({"success": True, "id": new_id}), 201
         except Exception as e:
             return jsonify({"error": str(e)}), 500
