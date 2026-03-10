@@ -13,6 +13,7 @@ Endpoints:
     POST /api/points/restore    Restore soft-deleted points by ID list
     GET  /api/points/deleted    List of soft-deleted points (trash)
     POST /api/clear             Delete all points (testing only)
+    POST /api/cuts              Dev endpoint for inserting cuts
     
 Background tasks:
     - UART receiver thread: Listens for incoming CSV data from ESP32, parses it, and stores in SQLite.
@@ -203,6 +204,25 @@ def api_clear():
 def api_cuts_compat():
     """Alias for /api/points (backwards compat with Chris's frontend)."""
     return api_points()
+
+@app.route("/api/cuts", methods=["POST"])
+def add_cut():
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "No JSON body provided"}), 400
+
+    lat = data.get('lat')
+    lng = data.get('lng')
+    timestamp = data.get('timestamp')  # optional
+
+    if lat is None or lng is None:
+        return jsonify({"error": "lat and lng are required"}), 400
+
+    try:
+        new_id = db.insert_cut(float(lat), float(lng), timestamp)
+        return jsonify({"success": True, "id": new_id}), 201
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 # ── Entry point ────────────────────────────────────────────────────

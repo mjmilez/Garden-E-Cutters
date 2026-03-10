@@ -249,3 +249,17 @@ def purge_expired_deleted(hours=48):
     if purged > 0:
         log.info("Purged %d expired soft-deleted point(s) (older than %d hours)", purged, hours)
     return purged
+
+def insert_cut(lat, lng, timestamp=None):
+    """Insert a single cut record. Returns the new row id."""
+    conn = get_db()
+    cursor = conn.cursor()
+    if timestamp is None:
+        from datetime import datetime
+        timestamp = datetime.utcnow().isoformat()
+    cursor.execute(
+        "INSERT INTO cuts (lat, lng, timestamp) VALUES (?, ?, ?)",
+        (lat, lng, timestamp)
+    )
+    conn.commit()
+    return cursor.lastrowid
