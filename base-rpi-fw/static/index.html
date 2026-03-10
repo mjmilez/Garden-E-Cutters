@@ -37,6 +37,7 @@
       <!-- Filters -->
       <div id="log-filters">
         <button id="filter-button">Filter</button>
+        <button id="delete-selected-button">Delete Selected</button>
 
         <label>
           Timestamp Range:
@@ -45,10 +46,36 @@
         </label>
       </div>
 
+      <!-- Add Cut panel -->
+      <section id="add-cut-panel">
+        <h2>Add Cut (Manual)</h2>
+        <div class="add-cut-row">
+          <label>
+            Lat
+            <input type="number" id="add-cut-lat" step="0.000001" />
+          </label>
+          <label>
+            Lon
+            <input type="number" id="add-cut-lon" step="0.000001" />
+          </label>
+          <label>
+            HDOP
+            <input type="number" id="add-cut-hdop" step="0.01" placeholder="0 (default)" />
+          </label>
+          <label>
+            UTC Time (HHMMSS)
+            <input type="text" id="add-cut-utc" placeholder="0 = default" />
+          </label>
+          <button id="add-cut-button">Add Cut</button>
+        </div>
+        <p id="add-cut-message" aria-live="polite"></p>
+      </section>
+
       <!-- Log table -->
       <table id="cut-log-table">
         <thead>
           <tr>
+            <th>Select</th>
             <th>ID</th>
             <th>UTC Time</th>
             <th>Latitude</th>
@@ -65,6 +92,12 @@
     </section>
 
     <section id="map-tab" class="tab-content">
+      <div id="map-mode-toggle">
+        <span id="map-mode-label">Map Mode:</span>
+        <button id="map-mode-normal" class="map-mode-button map-mode-active">Normal</button>
+        <button id="map-mode-hdop" class="map-mode-button">HDOP</button>
+      </div>
+
       <!-- Leaflet needs a real element with a height -->
       <div id="leaflet-map"></div>
     </section>
