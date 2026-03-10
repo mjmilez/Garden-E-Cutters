@@ -1,14 +1,13 @@
 [Unit]
-Description=Garden E-Cutters Base App
-Wants=network-online.target
-After=network-online.target
+Description=Base App Service
+After=network.target
 
 [Service]
 Type=simple
+User=root
 WorkingDirectory=/home/pi/Garden-E-Cutters/base-rpi-fw
-ExecStart=/home/pi/Garden-E-Cutters/base-rpi-fw/start_app.sh
+ExecStart=/bin/bash /home/pi/Garden-E-Cutters/base-rpi-fw/start_app.sh
 Restart=always
-RestartSec=5
 
 [Install]
 WantedBy=multi-user.target
