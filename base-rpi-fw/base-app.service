@@ -1,0 +1,13 @@
+[Unit]
+Description=Base App Service
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/home/pi/Garden-E-Cutters/base-rpi-fw
+ExecStart=/bin/bash /home/pi/Garden-E-Cutters/base-rpi-fw/start_app.sh
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
