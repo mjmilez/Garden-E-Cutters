@@ -24,3 +24,6 @@ __pycache__/
 # Pycache & recieved files
 base-rpi-fw/__pycache__/
 base-rpi-fw/recieved_files/
+
+# Database
+base-rpi-fw/watermelon_hub.db
