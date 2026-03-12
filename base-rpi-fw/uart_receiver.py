@@ -186,15 +186,11 @@ def _parse_and_store_csv(raw_bytes):
             if len(row) < 3:
                 continue
 
-        # Header detection: try parsing first field as a number
-        if '-' in row[0] and not row[0][0].isdigit():
+        # Header detection: 
+        if row[0][0].isalpha():
             log.debug("Skipping header row: %s", row)
             continue
-        # Also skip if it literally says "utc_time" 
-        if row[0].lower().startswith("utc_time"):
-            log.debug("Skipping header row: %s", row)
-            continue
-
+        
         try:
             record = {
                 "utc_date":       row[0],
