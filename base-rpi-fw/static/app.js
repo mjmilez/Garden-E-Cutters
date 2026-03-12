@@ -54,6 +54,24 @@ function normalizeLonForBounds(lon) {
   return lon;
 }
 
+function formatUtcDateForDisplay(utcDate) {
+  if (!utcDate || utcDate === "0000-00-00" || utcDate === "00-00-0000") {
+    return "";
+  }
+
+  const parts = String(utcDate).split("-");
+  if (parts.length !== 3) {
+    return utcDate;
+  }
+
+  const [year, month, day] = parts;
+  if (!year || !month || !day) {
+    return utcDate;
+  }
+
+  return `${month}/${day}/${year}`;
+}
+
 // API only gives a UTC time-of-day (no date). We treat it as "today" and format in ET.
 // This will show EST/EDT correctly based on today.
 function utcTimeToET(utcTime) {
@@ -90,6 +108,7 @@ async function fetchCuts() {
 
   cutsData = (Array.isArray(apiCuts) ? apiCuts : []).map(row => ({
     id: row.id,
+    utc_date: row.utc_date ?? "",
     utc_time: row.utc_time,
 
     latitude: Number(row.latitude),
@@ -119,6 +138,7 @@ function buildCutsSignature(cuts) {
   return JSON.stringify({
     count: sorted.length,
     newestId: newest.id ?? null,
+    newestDate: newest.utc_date ?? newest.manual_date ?? "",
     newestUtc: newest.utc_time ?? "",
     newestLat: newest.latitude ?? null,
     newestLon: newest.longitude ?? null
@@ -156,8 +176,15 @@ async function pollForCutUpdates() {
 }
 
 function toSortKey(cut) {
-  const raw = (cut.utc_time == null) ? "" : String(cut.utc_time);
-  return raw.split(".")[0].padStart(6, "0");
+  const datePart =
+    (cut.utc_date && cut.utc_date !== "0000-00-00" && cut.utc_date !== "00-00-0000")
+      ? String(cut.utc_date)
+      : "0000-00-00";
+
+  const timeRaw = (cut.utc_time == null) ? "" : String(cut.utc_time);
+  const timePart = timeRaw.split(".")[0].padStart(6, "0");
+
+  return `${datePart} ${timePart}`;
 }
 
 function getCutsSorted() {
@@ -180,6 +207,29 @@ function showAddCutMessage(kind, text) {
   if (kind === "success") msgEl.classList.add("success");
 }
 
+function normalizeManualDateToIso(dateStr) {
+  if (!dateStr) {
+    return "";
+  }
+
+  const trimmed = String(dateStr).trim();
+
+  const slashParts = trimmed.split("/");
+  if (slashParts.length === 3) {
+    const [month, day, year] = slashParts;
+    if (month && day && year) {
+      return `${year.padStart(4, "0")}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
+    }
+  }
+
+  const dashParts = trimmed.split("-");
+  if (dashParts.length === 3) {
+    return trimmed;
+  }
+
+  return "";
+}
+
 async function addCutFromForm() {
   const dateInput = document.getElementById("add-cut-date");
   const latInput = document.getElementById("add-cut-lat");
@@ -194,6 +244,8 @@ async function addCutFromForm() {
   }
 
   const dateRaw = dateInput.value.trim();
+  const utcDateIso = normalizeManualDateToIso(dateRaw);
+
   const lat = Number.parseFloat(latInput.value);
   const lon = Number.parseFloat(lonInput.value);
   const utcRaw = utcInput.value.trim();
@@ -202,6 +254,11 @@ async function addCutFromForm() {
 
   if (Number.isNaN(lat) || Number.isNaN(lon)) {
     showAddCutMessage("error", "Latitude and longitude are required and must be numbers.");
+    return;
+  }
+
+  if (dateRaw && !utcDateIso) {
+    showAddCutMessage("error", "Date must be in MM/DD/YYYY format.");
     return;
   }
 
@@ -221,9 +278,8 @@ async function addCutFromForm() {
     body.hdop = hdopVal;
   }
 
-  // Frontend-only: include a manual date field for future backend work.
-  if (dateRaw) {
-    body.date = dateRaw;
+  if (utcDateIso) {
+    body.utc_date = utcDateIso;
   }
 
   try {
@@ -239,7 +295,6 @@ async function addCutFromForm() {
       throw new Error(`POST /api/cuts failed: ${res.status}`);
     }
 
-    // Try to read the newly created ID so we can reflect the row immediately.
     let newId = null;
     try {
       const json = await res.json();
@@ -247,7 +302,7 @@ async function addCutFromForm() {
         newId = json.id;
       }
     } catch {
-      // If parsing fails, we'll still add a row without an ID.
+      // Ignore JSON parse failure.
     }
 
     dateInput.value = "";
@@ -256,10 +311,9 @@ async function addCutFromForm() {
     utcInput.value = "";
     hdopInput.value = "";
 
-    // Instead of re-fetching from the server (which doesn't yet persist the date),
-    // append a client-side cut so the date shows up immediately in the list.
     const newCut = {
       id: newId,
+      utc_date: utcDateIso || "",
       utc_time: utcRaw || "0",
       latitude: lat,
       longitude: normalizeLonForBounds(lon),
@@ -332,14 +386,10 @@ function hdopToRadiusAndOpacity(hdopRaw) {
     };
   }
 
-  // Clamp HDOP to a sane range so outliers don't dominate.
   const hdop = Math.min(HDOP_MAX, Math.max(HDOP_MIN, hdopRaw));
-
-  // Map HDOP linearly to radius: lower HDOP -> smaller radius, higher HDOP -> larger.
-  const t = (hdop - HDOP_MIN) / (HDOP_MAX - HDOP_MIN); // 0..1
+  const t = (hdop - HDOP_MIN) / (HDOP_MAX - HDOP_MIN);
   const radius = HDOP_MIN_RADIUS + t * (HDOP_MAX_RADIUS - HDOP_MIN_RADIUS);
 
-  // Slightly reduce fill opacity for worse HDOP so bad points look softer.
   const opacityMin = 0.4;
   const opacityMax = DEFAULT_FILL_OPACITY;
   const fillOpacity = opacityMax - t * (opacityMax - opacityMin);
@@ -363,9 +413,11 @@ function updateMap(cuts) {
   for (const cut of cuts) {
     const [lat, lon] = clampLatLon(cut.latitude, cut.longitude);
     const etTime = utcTimeToET(cut.utc_time);
+    const dateDisplay = formatUtcDateForDisplay(cut.utc_date) || cut.manual_date || "";
 
     const popupHtml =
       `<b>Cut ID: ${cut.id ?? ""}</b><br>` +
+      `Date: ${dateDisplay}<br>` +
       `ET Time: ${etTime || ""}<br>` +
       `Lat: ${lat.toFixed(6)}<br>` +
       `Lon: ${lon.toFixed(6)}<br>` +
@@ -378,7 +430,6 @@ function updateMap(cuts) {
         typeof cut.hdop === "number" &&
         !Number.isNaN(cut.hdop) &&
         cut.hdop > 0) {
-      // In HDOP mode, treat hdop as an exact radius in meters.
       L.circle([lat, lon], {
         radius: cut.hdop,
         weight: 1,
@@ -387,7 +438,6 @@ function updateMap(cuts) {
         .bindPopup(popupHtml)
         .addTo(cutLayer);
     } else {
-      // Normal mode or missing/invalid HDOP: fall back to pixel-based marker.
       L.circleMarker([lat, lon], {
         radius: DEFAULT_MARKER_RADIUS,
         weight: 2,
@@ -437,7 +487,7 @@ function renderTable() {
       : (cut.hdop ?? "");
 
     const etTime = utcTimeToET(cut.utc_time);
-    const dateDisplay = cut.manual_date ?? "";
+    const dateDisplay = formatUtcDateForDisplay(cut.utc_date) || cut.manual_date || "";
 
     tr.innerHTML = `
       <td><input type="checkbox" class="cut-select-checkbox" value="${cut.id ?? ""}"></td>
@@ -486,7 +536,6 @@ async function deleteSelectedCuts() {
     updateMap(getCutsSorted());
   } catch (err) {
     console.error(err);
-    // For now, just log the error. Could add a UI message later.
   }
 }
 
@@ -529,7 +578,6 @@ async function initDashboard() {
       } else if (targetId === "map-tab") {
         updateMap(getCutsSorted());
 
-        // Leaflet needs a kick when the map tab is shown
         setTimeout(() => {
           if (map) map.invalidateSize();
         }, 50);
