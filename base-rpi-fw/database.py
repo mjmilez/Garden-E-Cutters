@@ -280,7 +280,7 @@ def insert_cut(lat, lng, timestamp=None, hdop=None):
            (utc_date, utc_time, latitude, longitude, fix_quality,
             num_satellites, hdop, altitude, geoid_height)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-        (timestamp, lat, lng, 0, 0, hdop, altitude, 0.0)
+        ("00-00-0000", timestamp, lat, lng, 0, 0, hdop, altitude, 0.0)
     )
     conn.commit()
     new_id = cursor.lastrowid
