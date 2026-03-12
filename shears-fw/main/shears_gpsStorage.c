@@ -13,7 +13,7 @@ static const char* TAG = "gps_storage";
 static void writeCsvHeader(FILE* f)
 {
 	fprintf(f,
-	        "utc_time,latitude,longitude,fix_quality,"
+	        "utc_date, utc_time,latitude,longitude,fix_quality,"
 	        "num_satellites,hdop,altitude,geoid_height\n");
 }
 
@@ -82,7 +82,7 @@ bool shearsGpsStorageClearCsv(const char* csvPath)
 	return true;
 }
 
-bool shearsGpsStorageAppendGngga(const char* csvPath, const char* nmea)
+bool shearsGpsStorageAppendGngga(const char* csvPath, const char* nmea, const char* utcDate)
 {
 	if (!nmea || strncmp(nmea, "$GNGGA,", 7) != 0) {
 		return false;
@@ -121,11 +121,19 @@ bool shearsGpsStorageAppendGngga(const char* csvPath, const char* nmea)
 		return false;
 	}
 
-	fprintf(f, "%s,%.7f,%.7f,%d,%d,%.1f,%.3f,%.3f\n",
-	        utcTime, lat, lon, fix, sats, hdop, alt, geoid);
+	char dateFMT[11] = "MM-DD-YYYY";
+	if (utcDate && strlen(utcDate) == 6) {
+		snprintf(dateFMT, sizeof(dateFMT), "20%c%c-%c%c-%c%c",
+				utcDate[4], utcDate[5], 
+				utcDate[2], utcDate[3], 
+				utcDate[0], utcDate[1]);
+	}
+
+	fprintf(f, "%s,%s,%.7f,%.7f,%d,%d,%.1f,%.3f,%.3f\n",
+	        dateFMT, utcTime, lat, lon, fix, sats, hdop, alt, geoid);
 	fclose(f);
 
-	ESP_LOGI(TAG, "Saved: time=%s lat=%.7f lon=%.7f", utcTime, lat, lon);
+	ESP_LOGI(TAG, "Saved: date=%s time=%s lat=%.7f lon=%.7f", dateFMT, utcTime, lat, lon);
 	return true;
 }
 
@@ -185,11 +193,10 @@ void shearsGpsStoragePrintNewest(const char* csvPath, int maxLines)
 	}
 
 	printf("\n");
-	printf("line | %-11s | %-11s | %-12s | %-3s | %-4s | %-4s | %-8s | %-11s\n",
-	       "utc_time", "latitude", "longitude", "fix", "sats", "hdop", "alt(m)", "geoid(m)");
-	printf("-----+-------------+-------------+--------------+-----+------+------+-"
-	       "----------+------------\n");
-
+	printf("line | %-10s | %-10s | %-11s | %-12s | %-3s | %-4s | %-4s | %-8s | %-11s\n",
+		"utc_date", "utc_time", "latitude", "longitude", "fix", "sats", "hdop", "alt(m)", "geoid(m)");
+	printf("-----+------------+------------+-------------+--------------+-----+------+------+-"
+		"----------+------------\n");
 	int linesToPrint = (dataLinesSeen < maxLines) ? dataLinesSeen : maxLines;
 	int start = (dataLinesSeen >= maxLines) ? (dataLinesSeen % maxLines) : 0;
 
@@ -205,25 +212,26 @@ void shearsGpsStoragePrintNewest(const char* csvPath, int maxLines)
 			row[len - 1] = '\0';
 		}
 
-		char* tokens[8] = {0};
+		char* tokens[9] = {0};
 		int t = 0;
 
 		char* tok = strtok(row, ",");
-		while (tok && t < 8) {
+		while (tok && t < 9) {
 			tokens[t++] = tok;
 			tok = strtok(NULL, ",");
 		}
 
-		if (t < 8) {
+		if (t < 9) {
 			printf("%4d | (malformed) %s\n", lineNums[idx], lines[idx]);
 			continue;
 		}
 
 		char timeFmt[16];
-		formatUtcTime(tokens[0], timeFmt, sizeof(timeFmt));
+		formatUtcTime(tokens[1], timeFmt, sizeof(timeFmt));
 
-		printf("%4d | %-10s | %11s | %12s | %3s | %4s | %4s | %8s | %11s\n",
+		printf("%4d | %-10s | %-10s | %11s | %12s | %3s | %4s | %4s | %8s | %11s\n",
 		       lineNums[idx],
+			   tokens[0],
 		       timeFmt,
 		       tokens[1],
 		       tokens[2],

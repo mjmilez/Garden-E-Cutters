@@ -39,6 +39,7 @@ def init_db():
     conn.execute("""
         CREATE TABLE IF NOT EXISTS gps_points (
             id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            utc_date        TEXT    NOT NULL DEFAULT '0000-00-00',
             utc_time        TEXT    NOT NULL,
             latitude        REAL    NOT NULL,
             longitude       REAL    NOT NULL,
@@ -51,18 +52,24 @@ def init_db():
             deleted_at      TEXT    DEFAULT NULL
         )
     """)
-    
+
+    # ── Migration: add utc_date if upgrading from older schema ───
+    cursor = conn.execute("PRAGMA table_info(gps_points)")
+    columns = [row["name"] for row in cursor.fetchall()]
+    if "utc_date" not in columns:
+        conn.execute("ALTER TABLE gps_points ADD COLUMN utc_date TEXT NOT NULL DEFAULT '0000-00-00'")
+        log.info("Migrated gps_points table: added utc_date column")
+
     # ── Migration: add deleted_at if upgrading from older schema ───
     cursor = conn.execute("PRAGMA table_info(gps_points)")
     columns = [row["name"] for row in cursor.fetchall()]
     if "deleted_at" not in columns:
         conn.execute("ALTER TABLE gps_points ADD COLUMN deleted_at TEXT DEFAULT NULL")
         log.info("Migrated gps_points table: added deleted_at column")
-    
+
     conn.commit()
     conn.close()
     log.info("Database initialized: %s", config.DB_PATH)
-
 
 def insert_point(record):
     """
@@ -104,11 +111,12 @@ def insert_points_batch(records):
     conn = get_connection()
     conn.executemany(
         """INSERT INTO gps_points
-           (utc_time, latitude, longitude, fix_quality,
+           (utc_date, utc_time, latitude, longitude, fix_quality,
             num_satellites, hdop, altitude, geoid_height)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         [
             (
+                r["utc_date"],
                 r["utc_time"],
                 r["latitude"],
                 r["longitude"],
@@ -131,7 +139,7 @@ def get_all_points():
     """Return all active GPS points as a list of dicts."""
     conn = get_connection()
     rows = conn.execute(
-        """SELECT id, utc_time, latitude, longitude, fix_quality,
+        """SELECT id, utc_date, utc_time, latitude, longitude, fix_quality,
                   num_satellites, hdop, altitude, geoid_height
            FROM gps_points
            WHERE deleted_at IS NULL
@@ -155,7 +163,7 @@ def get_latest_points(n=50):
     """Return the N most recent points (newest first)."""
     conn = get_connection()
     rows = conn.execute(
-        """SELECT id, utc_time, latitude, longitude, fix_quality,
+        """SELECT id, utc_date, utc_time, latitude, longitude, fix_quality,
                   num_satellites, hdop, altitude, geoid_height
            FROM gps_points
            WHERE deleted_at IS NULL
@@ -222,7 +230,7 @@ def get_deleted_points():
     """Return all soft-deleted points (the 'trash' list)."""
     conn = get_connection()
     rows = conn.execute(
-        """SELECT id, utc_time, latitude, longitude, fix_quality,
+        """SELECT id, utc_date, utc_time, latitude, longitude, fix_quality,
                   num_satellites, hdop, altitude, geoid_height, deleted_at
            FROM gps_points
            WHERE deleted_at IS NOT NULL
@@ -269,10 +277,10 @@ def insert_cut(lat, lng, timestamp=None, hdop=None):
     conn = get_connection()
     cursor = conn.execute(
         """INSERT INTO gps_points
-           (utc_time, latitude, longitude, fix_quality,
+           (utc_date, utc_time, latitude, longitude, fix_quality,
             num_satellites, hdop, altitude, geoid_height)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-        (timestamp, lat, lng, 0, 0, hdop, altitude, 0.0)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        ("00-00-0000", timestamp, lat, lng, 0, 0, hdop, altitude, 0.0)
     )
     conn.commit()
     new_id = cursor.lastrowid

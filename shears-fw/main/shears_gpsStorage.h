@@ -10,7 +10,7 @@ bool shearsGpsStorageEnsureCsvExists(const char* csvPath);
 
 bool shearsGpsStorageClearCsv(const char* csvPath);
 
-bool shearsGpsStorageAppendGngga(const char* csvPath, const char* nmea);
+bool shearsGpsStorageAppendGngga(const char* csvPath, const char* nmea, const char* utcDate);
 
 void shearsGpsStoragePrintNewest(const char* csvPath, int maxLines);
 

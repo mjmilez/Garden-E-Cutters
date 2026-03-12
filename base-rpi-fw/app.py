@@ -112,13 +112,13 @@ def api_export():
     output = io.StringIO()
     writer = csv.writer(output)
     writer.writerow([
-        "id", "utc_time", "latitude", "longitude",
+        "id", "utc_date", "utc_time", "latitude", "longitude",
         "fix_quality", "num_satellites", "hdop",
         "altitude", "geoid_height",
     ])
     for p in points:
         writer.writerow([
-            p["id"], p["utc_time"], p["latitude"], p["longitude"],
+            p["id"], p["utc_date"], p["utc_time"], p["latitude"], p["longitude"],
             p["fix_quality"], p["num_satellites"], p["hdop"],
             p["altitude"], p["geoid_height"],
         ])
