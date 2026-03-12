@@ -29,6 +29,8 @@ const HDOP_MAX = 10;
 const HDOP_MIN_RADIUS = 2;
 const HDOP_MAX_RADIUS = 30;
 
+const POLL_INTERVAL_MS = 1000;
+
 // "normal" = current behavior, "hdop" = bubble size/opacity driven by HDOP
 let mapMode = "normal";
 
@@ -38,6 +40,11 @@ let cutsData = [];
 let map = null;
 let cutLayer = null;
 let mapInitialized = false;
+
+// Polling state
+let pollTimer = null;
+let pollInProgress = false;
+let lastCutsSignature = "";
 
 // If longitude comes in positive but our bounds are negative (US), flip it.
 function normalizeLonForBounds(lon) {
@@ -94,6 +101,58 @@ async function fetchCuts() {
     hdop: row.hdop != null ? Number(row.hdop) : null,
     num_satellites: row.num_satellites != null ? Number(row.num_satellites) : null
   }));
+}
+
+function buildCutsSignature(cuts) {
+  if (!Array.isArray(cuts) || cuts.length === 0) {
+    return "empty";
+  }
+
+  const sorted = [...cuts].sort((a, b) => {
+    const aId = Number.isFinite(a.id) ? a.id : -1;
+    const bId = Number.isFinite(b.id) ? b.id : -1;
+    return bId - aId;
+  });
+
+  const newest = sorted[0];
+
+  return JSON.stringify({
+    count: sorted.length,
+    newestId: newest.id ?? null,
+    newestUtc: newest.utc_time ?? "",
+    newestLat: newest.latitude ?? null,
+    newestLon: newest.longitude ?? null
+  });
+}
+
+async function pollForCutUpdates() {
+  if (pollInProgress) {
+    return;
+  }
+
+  pollInProgress = true;
+
+  try {
+    const previousSignature = lastCutsSignature;
+
+    await fetchCuts();
+
+    const newSignature = buildCutsSignature(cutsData);
+
+    if (newSignature !== previousSignature) {
+      lastCutsSignature = newSignature;
+
+      renderTable();
+
+      if (document.querySelector(".tab-content.active")?.id === "map-tab") {
+        updateMap(getCutsSorted());
+      }
+    }
+  } catch (err) {
+    console.error("Polling failed:", err);
+  } finally {
+    pollInProgress = false;
+  }
 }
 
 function toSortKey(cut) {
@@ -213,6 +272,7 @@ async function addCutFromForm() {
     };
 
     cutsData = [...cutsData, newCut];
+    lastCutsSignature = buildCutsSignature(cutsData);
 
     renderTable();
     updateMap(getCutsSorted());
@@ -294,14 +354,15 @@ function updateMap(cuts) {
   cutLayer.clearLayers();
 
   const totalCutsValue = document.getElementById("total-cuts-value");
-  totalCutsValue.textContent = cuts.length.toString();
+  if (totalCutsValue) {
+    totalCutsValue.textContent = cuts.length.toString();
+  }
 
   if (!cuts.length) return;
 
   for (const cut of cuts) {
     const [lat, lon] = clampLatLon(cut.latitude, cut.longitude);
     const etTime = utcTimeToET(cut.utc_time);
-    const dateDisplay = cut.manual_date ?? "";
 
     const popupHtml =
       `<b>Cut ID: ${cut.id ?? ""}</b><br>` +
@@ -342,10 +403,15 @@ function renderTable() {
   const tbody = document.getElementById("cut-log-body");
   const totalCutsValue = document.getElementById("total-cuts-value");
 
+  if (!tbody) return;
+
   tbody.innerHTML = "";
 
   const cuts = getCutsSorted();
-  totalCutsValue.textContent = cuts.length.toString();
+
+  if (totalCutsValue) {
+    totalCutsValue.textContent = cuts.length.toString();
+  }
 
   for (const cut of cuts) {
     const tr = document.createElement("tr");
@@ -414,6 +480,8 @@ async function deleteSelectedCuts() {
     }
 
     await fetchCuts();
+    lastCutsSignature = buildCutsSignature(cutsData);
+
     renderTable();
     updateMap(getCutsSorted());
   } catch (err) {
@@ -426,8 +494,13 @@ async function initDashboard() {
   const statusDot = document.getElementById("connection-status-dot");
   const statusText = document.getElementById("connection-status-text");
 
-  statusDot.classList.add("connected");
-  statusText.textContent = "Connected to Shears";
+  if (statusDot) {
+    statusDot.classList.add("connected");
+  }
+
+  if (statusText) {
+    statusText.textContent = "Connected to Shears";
+  }
 
   try {
     await fetchCuts();
@@ -435,6 +508,8 @@ async function initDashboard() {
     console.error(err);
     cutsData = [];
   }
+
+  lastCutsSignature = buildCutsSignature(cutsData);
 
   const tabButtons = document.querySelectorAll(".tab-button");
   const tabContents = document.querySelectorAll(".tab-content");
@@ -522,6 +597,12 @@ async function initDashboard() {
   }
 
   renderTable();
+
+  if (pollTimer !== null) {
+    clearInterval(pollTimer);
+  }
+
+  pollTimer = setInterval(pollForCutUpdates, POLL_INTERVAL_MS);
 }
 
 document.addEventListener("DOMContentLoaded", initDashboard);
