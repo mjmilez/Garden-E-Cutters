@@ -18,6 +18,7 @@
 #include "shears_primeSwitch.h"
 #include "shears_gpsButtons.h"
 #include "shears_gpsStorage.h"
+#include "log_transfer_server.h"
 
 #include <stdint.h>
 #include <string.h>
@@ -224,6 +225,13 @@ static void saveTask(void *arg)
 					shearsPiezoBeepPattern(4);
 				} else {
 					shearsGpsStoragePrintNewest(GPS_LOG_FILE_PATH, 5);
+
+					if (log_transfer_server_isConnected() &&
+					    !log_transfer_server_isTransferActive()) {
+						if (!log_transfer_server_startTransfer("gps_points.csv")) {
+							ESP_LOGW(TAG, "Failed to start log transfer after save");
+						}
+					}
 				}
 
 				nmeaValid = false;
