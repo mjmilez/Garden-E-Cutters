@@ -22,7 +22,8 @@
 
 #include "log_transfer_client.h"
 #include "log_transfer_protocol.h"
-#include "log_paths.h"   /* GPS_LOG_FILE_PATH, GPS_LOG_FILE_BASENAME */
+#include "log_paths.h"
+#include "base_uartFileTransfer.h"
 
 static const char *TAG = "log_xfer_cli";
 
@@ -30,10 +31,9 @@ static const char *TAG = "log_xfer_cli";
 
 typedef struct {
 	bool     active;
-	char     requestedName[64];   /* name requested from the shears */
-	FILE    *fp;                  /* local output file (SPIFFS) */
+	char     requestedName[64];
+	FILE    *fp;
 
-	/* RAM fallback when filesystem output is unavailable. */
 	uint8_t *buf;
 	uint32_t buf_size;
 
@@ -45,7 +45,6 @@ typedef struct {
 static log_transfer_client_cfg_t g_cfg;
 static base_log_transfer_state_t g_state;
 
-/* Debug helper used after transfer completion. */
 static void dump_downloaded_file(void);
 
 /* --- Public API ----------------------------------------------------------- */
@@ -67,10 +66,6 @@ void log_transfer_client_set_conn_handle(uint16_t connHandle)
 	g_cfg.connHandle = connHandle;
 }
 
-/*
- * Sends START_TRANSFER with the requested filename over the control
- * characteristic.
- */
 esp_err_t log_transfer_client_request_file(const char *filename)
 {
 	if (!filename || filename[0] == '\0') {
@@ -137,7 +132,6 @@ void log_transfer_client_on_ctrl_notify(const uint8_t *data, uint16_t len)
 	switch (st) {
 
 	case STATUS_OK: {
-		/* Request accepted; payload includes the file size. */
 		if (len < 6) {
 			ESP_LOGW(TAG, "STATUS_OK without size field");
 			return;
@@ -146,7 +140,6 @@ void log_transfer_client_on_ctrl_notify(const uint8_t *data, uint16_t len)
 		uint32_t fileSize = 0;
 		memcpy(&fileSize, &data[2], sizeof(fileSize));
 
-		/* Tear down any previous transfer state. */
 		if (g_state.active) {
 			if (g_state.fp) {
 				fclose(g_state.fp);
@@ -159,7 +152,6 @@ void log_transfer_client_on_ctrl_notify(const uint8_t *data, uint16_t len)
 			}
 		}
 
-		/* Primary destination is SPIFFS; fall back to RAM on failure. */
 		g_state.fp = fopen(GPS_LOG_FILE_PATH, "wb");
 		if (!g_state.fp) {
 			ESP_LOGE(TAG,
@@ -192,7 +184,6 @@ void log_transfer_client_on_ctrl_notify(const uint8_t *data, uint16_t len)
 	}
 
 	case STATUS_TRANSFER_DONE:
-		/* Transfer complete; close outputs and print a short preview. */
 		if (g_state.active) {
 			ESP_LOGI(TAG,
 			         "Transfer finished from shears: received=%u bytes, expected=%u",
@@ -202,11 +193,15 @@ void log_transfer_client_on_ctrl_notify(const uint8_t *data, uint16_t len)
 				fclose(g_state.fp);
 				g_state.fp = NULL;
 			}
+
+			g_state.active = false;
+
+			ESP_LOGI(TAG, "Triggering UART transfer to Raspberry Pi");
+			transferStart(TRANSFER_TRIGGER_EVENT);
 		} else {
 			ESP_LOGW(TAG, "Transfer done but no active state");
+			g_state.active = false;
 		}
-
-		g_state.active = false;
 
 		dump_downloaded_file();
 		break;
@@ -247,6 +242,10 @@ void log_transfer_client_on_data_notify(const uint8_t *data, uint16_t len)
 {
 	ESP_LOGI(TAG, "DATA notify: len=%u", len);
 
+	if (len < 2) {
+		return;
+	}
+
 	ESP_LOGI(TAG, "chunk bytes: %02X %02X", data[0], data[1]);
 
 	if (!g_state.active) {
@@ -257,14 +256,13 @@ void log_transfer_client_on_data_notify(const uint8_t *data, uint16_t len)
 		return;
 	}
 
-	/* First two bytes are the chunk index, remaining bytes are payload. */
 	uint16_t chunkIndex = 0;
 	memcpy(&chunkIndex, &data[0], sizeof(chunkIndex));
 	ESP_LOGI(TAG, "DATA notify: chunk=%u", chunkIndex);
 
 	if (chunkIndex != g_state.nextChunkIndex) {
 		ESP_LOGW(TAG, "Chunk mismatch: got %u expected %u (resync for debug)",
-				chunkIndex, g_state.nextChunkIndex);
+		         chunkIndex, g_state.nextChunkIndex);
 		g_state.nextChunkIndex = chunkIndex;
 	}
 
@@ -279,13 +277,11 @@ void log_transfer_client_on_data_notify(const uint8_t *data, uint16_t len)
 
 	printf("\n---- END CHUNK ----\n");
 
-	/* Stream into SPIFFS if an output file is active. */
 	if (g_state.fp) {
 		size_t written = fwrite(payload, 1, payloadLen, g_state.fp);
 		(void)written;
 	}
 
-	/* Optional RAM copy when filesystem output is unavailable. */
 	if (g_state.buf && g_state.buf_size > 0) {
 		if (g_state.bytesReceived + payloadLen <= g_state.buf_size) {
 			memcpy(&g_state.buf[g_state.bytesReceived], payload, payloadLen);
@@ -302,7 +298,6 @@ void log_transfer_client_on_data_notify(const uint8_t *data, uint16_t len)
 
 static void dump_downloaded_file(void)
 {
-	/* Prefer RAM buffer output when available. */
 	if (g_state.buf && g_state.expectedSize > 0) {
 		ESP_LOGI(TAG, "Dumping first lines from RAM buffer (%u bytes):",
 		         g_state.expectedSize);
@@ -330,7 +325,6 @@ static void dump_downloaded_file(void)
 			}
 		}
 
-		/* RAM buffer is only retained for the duration of the transfer. */
 		free(g_state.buf);
 		g_state.buf = NULL;
 		g_state.buf_size = 0;
@@ -338,7 +332,6 @@ static void dump_downloaded_file(void)
 		return;
 	}
 
-	/* Fall back to reading from SPIFFS if no RAM buffer exists. */
 	FILE *fp = fopen(GPS_LOG_FILE_PATH, "rb");
 	if (!fp) {
 		ESP_LOGE(TAG, "Could not open downloaded file '%s' for dump", GPS_LOG_FILE_PATH);
