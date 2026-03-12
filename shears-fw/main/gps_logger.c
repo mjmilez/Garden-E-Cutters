@@ -213,14 +213,21 @@ static void saveTask(void *arg)
 			saveRequestedFlag = false;
 
 			if (nmeaValid) {
+				bool saveOk;
+
 				ESP_LOGI(TAG, "Save requested; latest NMEA: %s", latestNmea);
 
-				shearsGpsStorageAppendGngga(GPS_LOG_FILE_PATH, latestNmea);
+				saveOk = shearsGpsStorageAppendGngga(GPS_LOG_FILE_PATH, latestNmea);
+
+				if (!saveOk) {
+					ESP_LOGW(TAG, "GPS save failed; playing no-signal feedback");
+					shearsPiezoBeepPattern(4);
+				} else {
+					shearsGpsStoragePrintNewest(GPS_LOG_FILE_PATH, 5);
+				}
 
 				nmeaValid = false;
 				memset(latestNmea, 0, sizeof(latestNmea));
-
-				shearsGpsStoragePrintNewest(GPS_LOG_FILE_PATH, 5);
 			} else {
 				ESP_LOGW(TAG, "Save requested but no valid NMEA data available");
 			}
