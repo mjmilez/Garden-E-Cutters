@@ -21,6 +21,17 @@ const MAP_BOUNDS = {
   maxLon: -80.031362
 };
 
+const DEFAULT_MARKER_RADIUS = 6;
+const DEFAULT_FILL_OPACITY = 0.8;
+
+const HDOP_MIN = 0.1;
+const HDOP_MAX = 10;
+const HDOP_MIN_RADIUS = 2;
+const HDOP_MAX_RADIUS = 30;
+
+// "normal" = current behavior, "hdop" = bubble size/opacity driven by HDOP
+let mapMode = "normal";
+
 let cutsData = [];
 
 // Leaflet state
@@ -94,6 +105,90 @@ function getCutsSorted() {
   return [...cutsData].sort((a, b) => toSortKey(b).localeCompare(toSortKey(a)));
 }
 
+function clearAddCutMessage() {
+  const msgEl = document.getElementById("add-cut-message");
+  if (!msgEl) return;
+  msgEl.textContent = "";
+  msgEl.classList.remove("error", "success");
+}
+
+function showAddCutMessage(kind, text) {
+  const msgEl = document.getElementById("add-cut-message");
+  if (!msgEl) return;
+  msgEl.textContent = text;
+  msgEl.classList.remove("error", "success");
+  if (kind === "error") msgEl.classList.add("error");
+  if (kind === "success") msgEl.classList.add("success");
+}
+
+async function addCutFromForm() {
+  const latInput = document.getElementById("add-cut-lat");
+  const lonInput = document.getElementById("add-cut-lon");
+  const utcInput = document.getElementById("add-cut-utc");
+  const hdopInput = document.getElementById("add-cut-hdop");
+
+  clearAddCutMessage();
+
+  if (!latInput || !lonInput || !utcInput || !hdopInput) {
+    return;
+  }
+
+  const lat = Number.parseFloat(latInput.value);
+  const lon = Number.parseFloat(lonInput.value);
+  const utcRaw = utcInput.value.trim();
+  const hdopRaw = hdopInput.value.trim();
+  const hdopVal = hdopRaw === "" ? Number.NaN : Number.parseFloat(hdopRaw);
+
+  if (Number.isNaN(lat) || Number.isNaN(lon)) {
+    showAddCutMessage("error", "Latitude and longitude are required and must be numbers.");
+    return;
+  }
+
+  if (lat < MAP_BOUNDS.minLat || lat > MAP_BOUNDS.maxLat ||
+      lon < MAP_BOUNDS.minLon || lon > MAP_BOUNDS.maxLon) {
+    showAddCutMessage("error", "Lat/Lon must be inside the Florida map bounds.");
+    return;
+  }
+
+  const body = {
+    lat,
+    lng: lon,
+    timestamp: utcRaw || "0",
+  };
+
+  if (!Number.isNaN(hdopVal)) {
+    body.hdop = hdopVal;
+  }
+
+  try {
+    const res = await fetch("/api/cuts", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+    });
+
+    if (!res.ok) {
+      throw new Error(`POST /api/cuts failed: ${res.status}`);
+    }
+
+    latInput.value = "";
+    lonInput.value = "";
+    utcInput.value = "";
+    hdopInput.value = "";
+
+    await fetchCuts();
+    renderTable();
+    updateMap(getCutsSorted());
+
+    showAddCutMessage("success", "Cut added.");
+  } catch (err) {
+    console.error(err);
+    showAddCutMessage("error", "Failed to add cut. See console for details.");
+  }
+}
+
 function initLeafletMapIfNeeded() {
   if (mapInitialized) return;
 
@@ -134,6 +229,29 @@ function clampLatLon(lat, lon) {
   return [clampedLat, clampedLon];
 }
 
+function hdopToRadiusAndOpacity(hdopRaw) {
+  if (typeof hdopRaw !== "number" || Number.isNaN(hdopRaw)) {
+    return {
+      radius: DEFAULT_MARKER_RADIUS,
+      fillOpacity: DEFAULT_FILL_OPACITY
+    };
+  }
+
+  // Clamp HDOP to a sane range so outliers don't dominate.
+  const hdop = Math.min(HDOP_MAX, Math.max(HDOP_MIN, hdopRaw));
+
+  // Map HDOP linearly to radius: lower HDOP -> smaller radius, higher HDOP -> larger.
+  const t = (hdop - HDOP_MIN) / (HDOP_MAX - HDOP_MIN); // 0..1
+  const radius = HDOP_MIN_RADIUS + t * (HDOP_MAX_RADIUS - HDOP_MIN_RADIUS);
+
+  // Slightly reduce fill opacity for worse HDOP so bad points look softer.
+  const opacityMin = 0.4;
+  const opacityMax = DEFAULT_FILL_OPACITY;
+  const fillOpacity = opacityMax - t * (opacityMax - opacityMin);
+
+  return { radius, fillOpacity };
+}
+
 function updateMap(cuts) {
   initLeafletMapIfNeeded();
   if (!map || !cutLayer) return;
@@ -159,13 +277,28 @@ function updateMap(cuts) {
       `HDOP: ${cut.hdop ?? ""}<br>` +
       `Sats: ${cut.num_satellites ?? ""}`;
 
-    L.circleMarker([lat, lon], {
-      radius: 6,
-      weight: 2,
-      fillOpacity: 0.8
-    })
-      .bindPopup(popupHtml)
-      .addTo(cutLayer);
+    if (mapMode === "hdop" &&
+        typeof cut.hdop === "number" &&
+        !Number.isNaN(cut.hdop) &&
+        cut.hdop > 0) {
+      // In HDOP mode, treat hdop as an exact radius in meters.
+      L.circle([lat, lon], {
+        radius: cut.hdop,
+        weight: 1,
+        fillOpacity: 0.3
+      })
+        .bindPopup(popupHtml)
+        .addTo(cutLayer);
+    } else {
+      // Normal mode or missing/invalid HDOP: fall back to pixel-based marker.
+      L.circleMarker([lat, lon], {
+        radius: DEFAULT_MARKER_RADIUS,
+        weight: 2,
+        fillOpacity: DEFAULT_FILL_OPACITY
+      })
+        .bindPopup(popupHtml)
+        .addTo(cutLayer);
+    }
   }
 }
 
@@ -204,6 +337,7 @@ function renderTable() {
     const etTime = utcTimeToET(cut.utc_time);
 
     tr.innerHTML = `
+      <td><input type="checkbox" class="cut-select-checkbox" value="${cut.id ?? ""}"></td>
       <td>${cut.id ?? ""}</td>
       <td>${etTime || (cut.utc_time ?? "")}</td>
       <td>${lat}</td>
@@ -215,6 +349,38 @@ function renderTable() {
       <td>${cut.num_satellites ?? ""}</td>
     `;
     tbody.appendChild(tr);
+  }
+}
+
+async function deleteSelectedCuts() {
+  const checkboxes = document.querySelectorAll(".cut-select-checkbox:checked");
+  const ids = Array.from(checkboxes)
+    .map(cb => Number.parseInt(cb.value, 10))
+    .filter(id => !Number.isNaN(id));
+
+  if (!ids.length) {
+    return;
+  }
+
+  try {
+    const res = await fetch("/api/points/delete", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ ids }),
+    });
+
+    if (!res.ok) {
+      throw new Error(`POST /api/points/delete failed: ${res.status}`);
+    }
+
+    await fetchCuts();
+    renderTable();
+    updateMap(getCutsSorted());
+  } catch (err) {
+    console.error(err);
+    // For now, just log the error. Could add a UI message later.
   }
 }
 
@@ -265,6 +431,55 @@ async function initDashboard() {
       if (document.querySelector(".tab-content.active")?.id === "map-tab") {
         updateMap(getCutsSorted());
       }
+    });
+  }
+
+  const addCutButton = document.getElementById("add-cut-button");
+  if (addCutButton) {
+    addCutButton.addEventListener("click", (evt) => {
+      evt.preventDefault();
+      addCutFromForm();
+    });
+  }
+
+  const deleteSelectedButton = document.getElementById("delete-selected-button");
+  if (deleteSelectedButton) {
+    deleteSelectedButton.addEventListener("click", (evt) => {
+      evt.preventDefault();
+      deleteSelectedCuts();
+    });
+  }
+
+  const mapModeNormalBtn = document.getElementById("map-mode-normal");
+  const mapModeHdopBtn = document.getElementById("map-mode-hdop");
+  const mapModeButtons = [mapModeNormalBtn, mapModeHdopBtn].filter(Boolean);
+
+  function setMapMode(newMode) {
+    mapMode = newMode;
+    mapModeButtons.forEach(btn => {
+      if (!btn) return;
+      const isActive =
+        (newMode === "normal" && btn.id === "map-mode-normal") ||
+        (newMode === "hdop" && btn.id === "map-mode-hdop");
+      btn.classList.toggle("map-mode-active", isActive);
+    });
+
+    if (document.querySelector(".tab-content.active")?.id === "map-tab") {
+      updateMap(getCutsSorted());
+    }
+  }
+
+  if (mapModeNormalBtn) {
+    mapModeNormalBtn.addEventListener("click", (evt) => {
+      evt.preventDefault();
+      setMapMode("normal");
+    });
+  }
+
+  if (mapModeHdopBtn) {
+    mapModeHdopBtn.addEventListener("click", (evt) => {
+      evt.preventDefault();
+      setMapMode("hdop");
     });
   }
 
