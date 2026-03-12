@@ -1,30 +1,36 @@
-# ESP-IDF build outputs
-build/
-sdkconfig
-sdkconfig.old
-CMakeCache.txt
-cmake-build-*/
+# ESP-IDF build files
+**/build/
+**/sdkconfig
+**/sdkconfig.old
 *.bin
 *.elf
+*.map
+
+# Python
+*.pyc
+__pycache__/
+
+# Logs
 *.log
 
 # Editor files
 .vscode/
 .idea/
 *.swp
-.DS_Store
+*.swo
+*~
 
-#for matthew MAC
+# OS files
+.DS_Store
+Thumbs.db
+
+# Matthew MAC
 shears-fw/.cache/
 
-# Python venv or tool cache
+# Python venv
 venv/
-__pycache__/
 
-# Pycache & recieved files
+# RPi hub specific
 base-rpi-fw/__pycache__/
 base-rpi-fw/recieved_files/
-
-# Database
 base-rpi-fw/watermelon_hub.db
-
