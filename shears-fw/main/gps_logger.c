@@ -68,7 +68,7 @@ static volatile int64_t lastTriggerPressUs = 0;
 static void uartReadTask(void *arg);
 static void saveTask(void *arg);
 static void requestCutFeedback(void);
-static bool IRAM_ATTR registerTriggerPress(void);
+static bool registerTriggerPress(void);
 
 /* ISR callbacks (wired up by shears_gpsButtons) */
 static void onPrimeLevel(int level);

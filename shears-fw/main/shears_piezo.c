@@ -9,6 +9,7 @@
 #include "driver/ledc.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "driver/gpio.h"
 
 #define PIEZO_PIN_A       GPIO_NUM_21
 #define PIEZO_PIN_B       GPIO_NUM_5
