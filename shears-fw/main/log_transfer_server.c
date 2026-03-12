@@ -22,6 +22,7 @@
 #include "host/ble_hs.h"
 #include "host/ble_att.h"
 
+#include "log_transfer_server.h"
 #include "log_transfer_protocol.h"
 #include "shears_gpsStorage.h"
 
@@ -32,9 +33,11 @@ static const char *TAG = "log_xfer_srv";
 #define LOG_CTRL_CHR_UUID  0xFFF1
 #define LOG_DATA_CHR_UUID  0xFFF2
 
+#define LOG_TRANSFER_INVALID_CONN_HANDLE BLE_HS_CONN_HANDLE_NONE
+
 typedef struct {
 	bool		active;
-	char		filename[64];		/* full path "/spiffs/<basename>" */
+	char		filename[64];
 	FILE		*fp;
 	uint32_t	file_size;
 	uint32_t	bytes_sent;
@@ -59,9 +62,9 @@ static int	log_data_access_cb(uint16_t conn_handle,
 				   struct ble_gatt_access_ctxt *ctxt,
 				   void *arg);
 static void	log_transfer_task(void *arg);
-static void	handle_start_transfer(uint16_t conn_handle,
-				      const uint8_t *filename_buf,
-				      uint16_t filename_len);
+static bool	start_transfer_internal(uint16_t conn_handle,
+					const uint8_t *filename_buf,
+					uint16_t filename_len);
 static void	handle_abort_transfer(void);
 static void	send_status(ctrl_status_code_t status, uint32_t file_size);
 
@@ -92,7 +95,6 @@ static struct ble_gatt_svc_def log_svc_def[] = {
 
 /* --- Status notifications ------------------------------------------------- */
 
-/* Sends a STATUS_* event on the control characteristic. */
 static void send_status(ctrl_status_code_t status, uint32_t file_size)
 {
 	ESP_LOGI(TAG, "send_status: code=%u size=%u (conn=%u, ctrl=0x%04x)",
@@ -117,9 +119,13 @@ static void send_status(ctrl_status_code_t status, uint32_t file_size)
 		g_log_xfer.ctrl_val_handle = g_ctrl_char_handle;
 	}
 
-	/* conn_handle == 0 can be valid in NimBLE; handle 0 is the only hard failure. */
 	if (g_log_xfer.ctrl_val_handle == 0) {
 		ESP_LOGW(TAG, "send_status aborted: missing ctrl handle");
+		return;
+	}
+
+	if (!log_transfer_server_isConnected()) {
+		ESP_LOGW(TAG, "send_status aborted: no active connection");
 		return;
 	}
 
@@ -130,40 +136,27 @@ static void send_status(ctrl_status_code_t status, uint32_t file_size)
 	}
 
 	int rc = ble_gatts_notify_custom(g_log_xfer.conn_handle,
-					g_log_xfer.ctrl_val_handle,
-					om);
+					 g_log_xfer.ctrl_val_handle,
+					 om);
 	if (rc != 0) {
 		ESP_LOGW(TAG, "STATUS notify failed rc=%d", rc);
 	}
 }
 
-/* --- Start / abort handlers ---------------------------------------------- */
+/* --- Transfer helpers ----------------------------------------------------- */
 
-static void handle_start_transfer(uint16_t conn_handle,
-				  const uint8_t *filename_buf,
-				  uint16_t filename_len)
+static bool start_transfer_internal(uint16_t conn_handle,
+				    const uint8_t *filename_buf,
+				    uint16_t filename_len)
 {
-	/* Track the current connection for STATUS_* and data notifications. */
 	g_log_xfer.conn_handle = conn_handle;
 
 	/*
-	 * Figure out how much data we can actually fit in one BLE notification.
-	 *
-	 * ATT MTU includes:
-	 *   - 3 bytes ATT overhead (opcode + handle)
-	 *   - remaining bytes = max attribute value size
-	 *
-	 * Since our data packet prepends a 2-byte chunk index,
-	 * the usable CSV payload per notification is:
-	 *
-	 *   (MTU - 3) - 2
+	 * ATT MTU includes the ATT header.
+	 * Reserve 2 bytes in the payload for the chunk index.
 	 */
 	uint16_t mtu = ble_att_mtu(conn_handle);
-
-	/* Max attribute value size for a notification */
 	uint16_t maxNotif = (mtu > 3) ? (mtu - 3) : 0;
-
-	/* Subtract 2 bytes for the chunk index header */
 	uint16_t maxPayload = (maxNotif > 2) ? (maxNotif - 2) : 0;
 
 	if (maxPayload == 0) {
@@ -172,10 +165,9 @@ static void handle_start_transfer(uint16_t conn_handle,
 			fclose(g_log_xfer.fp);
 			g_log_xfer.fp = NULL;
 		}
-		return;
+		return false;
 	}
 
-	/* Cap payload to the buffer size */
 	if (maxPayload > 160) {
 		maxPayload = 160;
 	}
@@ -194,15 +186,15 @@ static void handle_start_transfer(uint16_t conn_handle,
 
 	if (g_log_xfer.active) {
 		send_status(STATUS_ERR_BUSY, 0);
-		return;
+		return false;
 	}
 
 	if (filename_len == 0 || filename_len > 48) {
 		send_status(STATUS_ERR_FS, 0);
-		return;
+		return false;
 	}
 
-	char basename[48];
+	char basename[49];
 	memcpy(basename, filename_buf, filename_len);
 	basename[filename_len] = '\0';
 
@@ -212,7 +204,7 @@ static void handle_start_transfer(uint16_t conn_handle,
 			 basename);
 	if (n <= 0 || n >= (int)sizeof(g_log_xfer.filename)) {
 		send_status(STATUS_ERR_FS, 0);
-		return;
+		return false;
 	}
 
 	ESP_LOGI(TAG, "Start transfer for file '%s'", g_log_xfer.filename);
@@ -221,23 +213,27 @@ static void handle_start_transfer(uint16_t conn_handle,
 	if (!fp) {
 		ESP_LOGW(TAG, "File not found");
 		send_status(STATUS_ERR_NO_FILE, 0);
-		return;
+		return false;
 	}
 
 	if (fseek(fp, 0, SEEK_END) != 0) {
 		fclose(fp);
 		send_status(STATUS_ERR_FS, 0);
-		return;
+		return false;
 	}
 
 	long size = ftell(fp);
 	if (size < 0) {
 		fclose(fp);
 		send_status(STATUS_ERR_FS, 0);
-		return;
+		return false;
 	}
 
-	fseek(fp, 0, SEEK_SET);
+	if (fseek(fp, 0, SEEK_SET) != 0) {
+		fclose(fp);
+		send_status(STATUS_ERR_FS, 0);
+		return false;
+	}
 
 	g_log_xfer.active	 = true;
 	g_log_xfer.fp		 = fp;
@@ -245,9 +241,8 @@ static void handle_start_transfer(uint16_t conn_handle,
 	g_log_xfer.bytes_sent	 = 0;
 	g_log_xfer.chunk_index	 = 0;
 
-	/* chunk_size already set above based on MTU */
-
 	send_status(STATUS_OK, g_log_xfer.file_size);
+	return true;
 }
 
 static void handle_abort_transfer(void)
@@ -263,6 +258,55 @@ static void handle_abort_transfer(void)
 
 	g_log_xfer.active = false;
 	send_status(STATUS_TRANSFER_ABORTED, g_log_xfer.file_size);
+}
+
+/* --- Public API ----------------------------------------------------------- */
+
+void log_transfer_server_setConnection(uint16_t conn_handle)
+{
+	g_log_xfer.conn_handle = conn_handle;
+}
+
+void log_transfer_server_clearConnection(void)
+{
+	g_log_xfer.conn_handle = LOG_TRANSFER_INVALID_CONN_HANDLE;
+}
+
+bool log_transfer_server_isConnected(void)
+{
+	return g_log_xfer.conn_handle != LOG_TRANSFER_INVALID_CONN_HANDLE;
+}
+
+bool log_transfer_server_isTransferActive(void)
+{
+	return g_log_xfer.active;
+}
+
+bool log_transfer_server_startTransfer(const char *filename)
+{
+	if (filename == NULL) {
+		ESP_LOGW(TAG, "startTransfer failed: filename is NULL");
+		return false;
+	}
+
+	if (filename[0] == '\0') {
+		ESP_LOGW(TAG, "startTransfer failed: filename is empty");
+		return false;
+	}
+
+	if (!log_transfer_server_isConnected()) {
+		ESP_LOGW(TAG, "startTransfer failed: no active BLE connection");
+		return false;
+	}
+
+	return start_transfer_internal(g_log_xfer.conn_handle,
+				       (const uint8_t *)filename,
+				       (uint16_t)strlen(filename));
+}
+
+void log_transfer_server_abortTransfer(void)
+{
+	handle_abort_transfer();
 }
 
 /* --- GATT callbacks ------------------------------------------------------- */
@@ -294,7 +338,7 @@ static int log_ctrl_access_cb(uint16_t conn_handle,
 
 	switch ((ctrl_opcode_t)opcode) {
 	case CTRL_CMD_START_TRANSFER:
-		handle_start_transfer(conn_handle, &buf[1], len - 1);
+		(void)start_transfer_internal(conn_handle, &buf[1], len - 1);
 		break;
 
 	case CTRL_CMD_ABORT:
@@ -319,7 +363,6 @@ static int log_data_access_cb(uint16_t conn_handle,
 	(void)ctxt;
 	(void)arg;
 
-	/* Notify-only characteristic on the shears side. */
 	return 0;
 }
 
@@ -356,7 +399,7 @@ static void log_transfer_task(void *arg)
 					 (n > 7) ? buf[9] : 0);
 			}
 
-			if (n > 0 && g_log_xfer.data_val_handle != 0) {
+			if (n > 0 && g_log_xfer.data_val_handle != 0 && log_transfer_server_isConnected()) {
 				uint16_t idx = g_log_xfer.chunk_index;
 				memcpy(&buf[0], &idx, sizeof(idx));
 
@@ -384,7 +427,6 @@ static void log_transfer_task(void *arg)
 			}
 
 			if (n < g_log_xfer.chunk_size) {
-				/* Short read indicates EOF or read error. */
 				if (g_log_xfer.fp) {
 					fclose(g_log_xfer.fp);
 					g_log_xfer.fp = NULL;
@@ -421,6 +463,7 @@ static void log_transfer_task(void *arg)
 void log_transfer_server_init(void)
 {
 	memset(&g_log_xfer, 0, sizeof(g_log_xfer));
+	g_log_xfer.conn_handle = LOG_TRANSFER_INVALID_CONN_HANDLE;
 
 	int rc = ble_gatts_count_cfg(log_svc_def);
 	if (rc != 0) {

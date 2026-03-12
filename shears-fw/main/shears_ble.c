@@ -27,7 +27,7 @@
 #include "services/gap/ble_svc_gap.h"
 #include "services/gatt/ble_svc_gatt.h"
 
-#include "log_transfer_server.h"   /* Log transfer GATT service */
+#include "log_transfer_server.h"
 
 static const char *TAG = "shears_ble";
 
@@ -56,7 +56,11 @@ static int gapEventHandler(struct ble_gap_event *event, void *arg)
 
 	case BLE_GAP_EVENT_CONNECT:
 		if (event->connect.status == 0) {
-			ESP_LOGI(TAG, "Connected to central");
+			ESP_LOGI(TAG, "Connected to central (conn_handle=%u)",
+				 event->connect.conn_handle);
+
+			log_transfer_server_setConnection(event->connect.conn_handle);
+
 			if (connCallback) {
 				connCallback(true);
 			}
@@ -64,6 +68,8 @@ static int gapEventHandler(struct ble_gap_event *event, void *arg)
 			ESP_LOGW(TAG,
 			         "Connect failed (status=%d), restarting advertising",
 			         event->connect.status);
+
+			log_transfer_server_clearConnection();
 
 			if (connCallback) {
 				connCallback(false);
@@ -74,6 +80,10 @@ static int gapEventHandler(struct ble_gap_event *event, void *arg)
 
 	case BLE_GAP_EVENT_DISCONNECT:
 		ESP_LOGI(TAG, "Disconnected, restarting advertising");
+
+		log_transfer_server_abortTransfer();
+		log_transfer_server_clearConnection();
+
 		if (connCallback) {
 			connCallback(false);
 		}
@@ -81,7 +91,6 @@ static int gapEventHandler(struct ble_gap_event *event, void *arg)
 		break;
 
 	default:
-		/* Unused GAP events (MTU updates, PHY changes, etc.). */
 		break;
 	}
 
@@ -122,8 +131,8 @@ static void startAdvertising(void)
 	struct ble_gap_adv_params advParams;
 	memset(&advParams, 0, sizeof(advParams));
 
-	advParams.conn_mode = BLE_GAP_CONN_MODE_UND;  /* undirected connectable */
-	advParams.disc_mode = BLE_GAP_DISC_MODE_GEN;  /* general discovery mode */
+	advParams.conn_mode = BLE_GAP_CONN_MODE_UND;
+	advParams.disc_mode = BLE_GAP_DISC_MODE_GEN;
 
 	rc = ble_gap_adv_start(ownAddrType,
 	                       NULL,
