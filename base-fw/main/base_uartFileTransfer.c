@@ -1,5 +1,3 @@
-// uartFileTransfer.c
-
 #include <stdio.h>
 #include <string.h>
 #include <stdbool.h>
@@ -15,6 +13,9 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 
+#include "base_uartFileTransfer.h"
+#include "log_paths.h"
+
 #define TAG "uartTx"
 
 /* ───────────────────────── Config ───────────────────────── */
@@ -28,7 +29,7 @@
 #define BUTTON_GPIO			(GPIO_NUM_32)
 #define BUTTON_ACTIVE_LOW	1
 
-#define CSV_PATH			"/spiffs/gps_points.csv"
+#define CSV_PATH			GPS_LOG_FILE_PATH
 
 #define START_BYTE			0xAA
 
@@ -44,11 +45,6 @@
 #define MAX_RETRIES			5
 
 /* ───────────────────────── Events ───────────────────────── */
-
-typedef enum {
-	TRANSFER_TRIGGER_BUTTON = 1,
-	TRANSFER_TRIGGER_EVENT = 2,
-} transferTrigger_t;
 
 typedef struct {
 	transferTrigger_t trigger;
@@ -307,7 +303,6 @@ static bool transferCsvFile(void)
 	}
 
 	ESP_LOGI(TAG, "COMMIT ok -> clearing file");
-	/* Clear file: simplest is truncate to 0 bytes */
 	FILE* wf = fopen(CSV_PATH, "wb");
 	if (!wf) {
 		ESP_LOGE(TAG, "Failed to clear file");
@@ -385,7 +380,6 @@ static void transferTask(void* arg)
 
 void uartFileTransferInit(void)
 {
-	/* UART setup */
 	uart_config_t cfg = {
 		.baud_rate = UART_BAUD,
 		.data_bits = UART_DATA_8_BITS,
@@ -403,7 +397,6 @@ void uartFileTransferInit(void)
 
 	xTaskCreate(transferTask, "transferTask", 4096, NULL, 10, NULL);
 
-	/* Button setup */
 	gpio_config_t io = {
 		.pin_bit_mask = 1ULL << BUTTON_GPIO,
 		.mode = GPIO_MODE_INPUT,
