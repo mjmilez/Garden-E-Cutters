@@ -13,7 +13,7 @@ static const char* TAG = "gps_storage";
 static void writeCsvHeader(FILE* f)
 {
 	fprintf(f,
-	        "utc_time,latitude,longitude,fix_quality,"
+	        "utc_date, utc_time,latitude,longitude,fix_quality,"
 	        "num_satellites,hdop,altitude,geoid_height\n");
 }
 
@@ -121,11 +121,19 @@ bool shearsGpsStorageAppendGngga(const char* csvPath, const char* nmea)
 		return false;
 	}
 
-	fprintf(f, "%s,%.7f,%.7f,%d,%d,%.1f,%.3f,%.3f\n",
-	        utcTime, lat, lon, fix, sats, hdop, alt, geoid);
+	char dateFMT[11] = "MM-DD-YYYY";
+	if (utcDate && strlen(utcDate) == 6) {
+		snprintf(dateFMT, sizeof(dateFMT), "20%c%c-%c%c-%c%c",
+				utcDate[4], utcDate[5], 
+				utcDate[2], utcDate[3], 
+				utcDate[0], utcDate[1]);
+	}
+
+	fprintf(f, "%s,%s,%.7f,%.7f,%d,%d,%.1f,%.3f,%.3f\n",
+	        dateFmt, utcTime, lat, lon, fix, sats, hdop, alt, geoid);
 	fclose(f);
 
-	ESP_LOGI(TAG, "Saved: time=%s lat=%.7f lon=%.7f", utcTime, lat, lon);
+	ESP_LOGI(TAG, "Saved: date=%s time=%s lat=%.7f lon=%.7f", dateFmt, utcTime, lat, lon);
 	return true;
 }
 

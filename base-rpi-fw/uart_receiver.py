@@ -161,7 +161,7 @@ def _parse_and_store_csv(raw_bytes):
     Parse the received file as CSV and insert rows into the database.
 
     CSV format from shears (gps_points.csv):
-        utc_time,latitude,longitude,fix_quality,num_satellites,hdop,altitude,geoid_height
+        utc_date,utc_time,latitude,longitude,fix_quality,num_satellites,hdop,altitude,geoid_height
         123456.00,29.6516,-82.3248,1,8,1.2,30.5,0.0
         ...
 
@@ -180,30 +180,32 @@ def _parse_and_store_csv(raw_bytes):
     records = []
 
     for row in reader:
-        # Need at least 8 columns for the full GPS record
-        if len(row) < 8:
+        # Need at least 9 columns for the full GPS record
+        if len(row) < 9:
             # Could be a partial/malformed line, try with fewer fields
             if len(row) < 3:
                 continue
 
         # Header detection: try parsing first field as a number
-        try:
-            float(row[0])
-        except ValueError:
-            # First field isn't numeric — this is the header row, skip it
+        if '-' in row[0] and not row[0][0].isdigit():
+            log.debug("Skipping header row: %s", row)
+            continue
+        # Also skip if it literally says "utc_time" 
+        if row[0].lower().startswith("utc_time"):
             log.debug("Skipping header row: %s", row)
             continue
 
         try:
             record = {
-                "utc_time":       row[0],
-                "latitude":       float(row[1]) if len(row) > 1 else 0.0,
-                "longitude":      float(row[2]) if len(row) > 2 else 0.0,
-                "fix_quality":    int(row[3])   if len(row) > 3 else 0,
-                "num_satellites": int(row[4])   if len(row) > 4 else 0,
-                "hdop":           float(row[5]) if len(row) > 5 else 0.0,
-                "altitude":       float(row[6]) if len(row) > 6 else 0.0,
-                "geoid_height":   float(row[7]) if len(row) > 7 else 0.0,
+                "utc_date":       row[0],
+                "utc_time":       row[1],
+                "latitude":       float(row[2]) if len(row) > 2 else 0.0,
+                "longitude":      float(row[3]) if len(row) > 3 else 0.0,
+                "fix_quality":    int(row[4])   if len(row) > 4 else 0,
+                "num_satellites": int(row[5])   if len(row) > 5 else 0,
+                "hdop":           float(row[6]) if len(row) > 6 else 0.0,
+                "altitude":       float(row[7]) if len(row) > 7 else 0.0,
+                "geoid_height":   float(row[8]) if len(row) > 8 else 0.0,
             }
             records.append(record)
         except (ValueError, IndexError) as e:

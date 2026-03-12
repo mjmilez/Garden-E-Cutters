@@ -48,6 +48,7 @@
 static const char *TAG = "gps_logger";
 
 static char latestNmea[GPS_BUF_SIZE];
+static char latestDate[8] = {0};
 
 static volatile bool nmeaValid = false;
 static volatile bool saveRequestedFlag = false;
@@ -131,6 +132,18 @@ static void IRAM_ATTR onCutPress(gpio_num_t pin)
 	}
 }
 
+/* Helper to extract field N from an NMEA sentence (0-indexed) */
+static const char *nmeaField(const char *sentence, int fieldNum)
+{
+    const char *p = sentence;
+    for (int i = 0; i < fieldNum; i++) {
+        p = strchr(p, ',');
+        if (!p) return NULL;
+        p++;  /* skip the comma */
+    }
+    return p;
+}
+
 static void uartReadTask(void *arg)
 {
 	(void)arg;
@@ -156,6 +169,16 @@ static void uartReadTask(void *arg)
 				if (c == '\n') {
 					nmea_buf[nmea_len] = '\0';
 
+					/* Always grab date from RMC when available */
+					if (strncmp(nmea_buf, "$GNRMC,", 7) == 0) {
+						const char *dateField = nmeaField(nmea_buf, 9);
+						if (dateField && dateField[0] != ',' && dateField[0] != '*') {
+							strncpy(latestDate, dateField, 6);
+								latestDate[6] = '\0';
+						}
+					}
+
+					/* Capture GGA sentence when requested */
 					if (captureNextGGA && strncmp(nmea_buf, "$GNGGA,", 7) == 0) {
 						strncpy(latestNmea, nmea_buf, GPS_BUF_SIZE);
 						nmeaValid = true;
@@ -215,7 +238,7 @@ static void saveTask(void *arg)
 			if (nmeaValid) {
 				ESP_LOGI(TAG, "Save requested; latest NMEA: %s", latestNmea);
 
-				shearsGpsStorageAppendGngga(GPS_LOG_FILE_PATH, latestNmea);
+				shearsGpsStorageAppendGngga(GPS_LOG_FILE_PATH, latestNmea, latestDate);
 
 				nmeaValid = false;
 				memset(latestNmea, 0, sizeof(latestNmea));
