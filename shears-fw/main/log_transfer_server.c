@@ -23,6 +23,7 @@
 #include "host/ble_att.h"
 
 #include "log_transfer_protocol.h"
+#include "shears_gpsStorage.h"
 
 static const char *TAG = "log_xfer_srv";
 
@@ -397,6 +398,15 @@ static void log_transfer_task(void *arg)
 
 				send_status(STATUS_TRANSFER_DONE,
 					    g_log_xfer.file_size);
+
+				ESP_LOGI(TAG, "Clearing transferred log file '%s'",
+					 g_log_xfer.filename);
+
+				if (shearsGpsStorageClearCsv(g_log_xfer.filename)) {
+					ESP_LOGI(TAG, "Cleared transferred log file");
+				} else {
+					ESP_LOGW(TAG, "Failed to clear transferred log file");
+				}
 			}
 
 			vTaskDelay(pdMS_TO_TICKS(10));

@@ -122,6 +122,7 @@ function showAddCutMessage(kind, text) {
 }
 
 async function addCutFromForm() {
+  const dateInput = document.getElementById("add-cut-date");
   const latInput = document.getElementById("add-cut-lat");
   const lonInput = document.getElementById("add-cut-lon");
   const utcInput = document.getElementById("add-cut-utc");
@@ -129,10 +130,11 @@ async function addCutFromForm() {
 
   clearAddCutMessage();
 
-  if (!latInput || !lonInput || !utcInput || !hdopInput) {
+  if (!dateInput || !latInput || !lonInput || !utcInput || !hdopInput) {
     return;
   }
 
+  const dateRaw = dateInput.value.trim();
   const lat = Number.parseFloat(latInput.value);
   const lon = Number.parseFloat(lonInput.value);
   const utcRaw = utcInput.value.trim();
@@ -160,6 +162,11 @@ async function addCutFromForm() {
     body.hdop = hdopVal;
   }
 
+  // Frontend-only: include a manual date field for future backend work.
+  if (dateRaw) {
+    body.date = dateRaw;
+  }
+
   try {
     const res = await fetch("/api/cuts", {
       method: "POST",
@@ -173,12 +180,40 @@ async function addCutFromForm() {
       throw new Error(`POST /api/cuts failed: ${res.status}`);
     }
 
+    // Try to read the newly created ID so we can reflect the row immediately.
+    let newId = null;
+    try {
+      const json = await res.json();
+      if (json && typeof json.id === "number") {
+        newId = json.id;
+      }
+    } catch {
+      // If parsing fails, we'll still add a row without an ID.
+    }
+
+    dateInput.value = "";
     latInput.value = "";
     lonInput.value = "";
     utcInput.value = "";
     hdopInput.value = "";
 
-    await fetchCuts();
+    // Instead of re-fetching from the server (which doesn't yet persist the date),
+    // append a client-side cut so the date shows up immediately in the list.
+    const newCut = {
+      id: newId,
+      utc_time: utcRaw || "0",
+      latitude: lat,
+      longitude: normalizeLonForBounds(lon),
+      altitude: 73.0,
+      fix_quality: 0,
+      geoid_height: 0.0,
+      hdop: Number.isNaN(hdopVal) ? 0.0 : hdopVal,
+      num_satellites: 0,
+      manual_date: dateRaw || "",
+    };
+
+    cutsData = [...cutsData, newCut];
+
     renderTable();
     updateMap(getCutsSorted());
 
@@ -266,6 +301,7 @@ function updateMap(cuts) {
   for (const cut of cuts) {
     const [lat, lon] = clampLatLon(cut.latitude, cut.longitude);
     const etTime = utcTimeToET(cut.utc_time);
+    const dateDisplay = cut.manual_date ?? "";
 
     const popupHtml =
       `<b>Cut ID: ${cut.id ?? ""}</b><br>` +
@@ -335,10 +371,12 @@ function renderTable() {
       : (cut.hdop ?? "");
 
     const etTime = utcTimeToET(cut.utc_time);
+    const dateDisplay = cut.manual_date ?? "";
 
     tr.innerHTML = `
       <td><input type="checkbox" class="cut-select-checkbox" value="${cut.id ?? ""}"></td>
       <td>${cut.id ?? ""}</td>
+      <td>${dateDisplay}</td>
       <td>${etTime || (cut.utc_time ?? "")}</td>
       <td>${lat}</td>
       <td>${lon}</td>
