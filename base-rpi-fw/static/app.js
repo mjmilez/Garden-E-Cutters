@@ -91,20 +91,26 @@ function utcTimeToET(utcTime) {
 function utcDateToISO(utcDate) {
   if (!utcDate) return "";
   const raw = String(utcDate).trim();
-  if (raw === "0" || raw.length < 6) return "";
+  if (raw === "0" || raw === "0000-00-00" || raw === "00-00-0000") return "";
 
-  const dd = raw.slice(0, 2);
-  const mm = raw.slice(2, 4);
-  const yy = raw.slice(4, 6);
+  // Already ISO format (YYYY-MM-DD) — return as-is
+  if (raw.length === 10 && raw[4] === "-") {
+    return raw;
+  }
 
-  // Validate: day 01-31, month 01-12, year is digits
-  const day = Number(dd);
-  const month = Number(mm);
-  if (Number.isNaN(day) || Number.isNaN(month)) return "";
-  if (day < 1 || day > 31 || month < 1 || month > 12) return "";
+  // DDMMYY from GPS $GNRMC
+  if (raw.length >= 6) {
+    const dd = raw.slice(0, 2);
+    const mm = raw.slice(2, 4);
+    const yy = raw.slice(4, 6);
+    const day = Number(dd);
+    const month = Number(mm);
+    if (Number.isNaN(day) || Number.isNaN(month)) return "";
+    if (day < 1 || day > 31 || month < 1 || month > 12) return "";
+    return `20${yy}-${mm}-${dd}`;
+  }
 
-  // Assume 20xx for two-digit year
-  return `20${yy}-${mm}-${dd}`;
+  return "";
 }
 
 async function fetchCuts() {
