@@ -29,8 +29,6 @@ const HDOP_MAX = 10;
 const HDOP_MIN_RADIUS = 2;
 const HDOP_MAX_RADIUS = 30;
 
-const POLL_INTERVAL_MS = 1000;
-
 // "normal" = current behavior, "hdop" = bubble size/opacity driven by HDOP
 let mapMode = "normal";
 
@@ -41,11 +39,6 @@ let map = null;
 let cutLayer = null;
 let mapInitialized = false;
 
-// Polling state
-let pollTimer = null;
-let pollInProgress = false;
-let lastCutsSignature = "";
-
 // If longitude comes in positive but our bounds are negative (US), flip it.
 function normalizeLonForBounds(lon) {
   if (typeof lon !== "number") return lon;
@@ -54,36 +47,22 @@ function normalizeLonForBounds(lon) {
   return lon;
 }
 
-function formatUtcDateForDisplay(utcDate) {
-  if (!utcDate || utcDate === "0000-00-00" || utcDate === "00-00-0000") {
-    return "";
-  }
-
-  const parts = String(utcDate).split("-");
-  if (parts.length !== 3) {
-    return utcDate;
-  }
-
-  const [year, month, day] = parts;
-  if (!year || !month || !day) {
-    return utcDate;
-  }
-
-  return `${month}/${day}/${year}`;
-}
-
 // API only gives a UTC time-of-day (no date). We treat it as "today" and format in ET.
 // This will show EST/EDT correctly based on today.
 function utcTimeToET(utcTime) {
   if (!utcTime) return "";
 
   const raw = String(utcTime).trim();
+  // "0" is the default placeholder from manual cuts — not a real time
+  if (raw === "0" || raw === "") return "";
+
   const main = raw.split(".")[0].padStart(6, "0"); // HHMMSS
   const hh = Number(main.slice(0, 2));
   const mm = Number(main.slice(2, 4));
   const ss = Number(main.slice(4, 6));
 
-  if ([hh, mm, ss].some(n => Number.isNaN(n))) return raw;
+  if ([hh, mm, ss].some(n => Number.isNaN(n))) return "";
+  if (hh > 23 || mm > 59 || ss > 59) return "";
 
   const now = new Date();
   const y = now.getUTCFullYear();
@@ -98,6 +77,34 @@ function utcTimeToET(utcTime) {
     second: "2-digit",
     hour12: true
   }).format(dt);
+}
+
+/**
+ * Convert utc_date from the API (DDMMYY string from $GNRMC) into "YYYY-MM-DD"
+ * so it can be compared against the <input type="date"> filter values.
+ *
+ * Examples:
+ *   "240326" → "2026-03-24"
+ *   "010125" → "2025-01-01"
+ *   ""       → ""
+ */
+function utcDateToISO(utcDate) {
+  if (!utcDate) return "";
+  const raw = String(utcDate).trim();
+  if (raw === "0" || raw.length < 6) return "";
+
+  const dd = raw.slice(0, 2);
+  const mm = raw.slice(2, 4);
+  const yy = raw.slice(4, 6);
+
+  // Validate: day 01-31, month 01-12, year is digits
+  const day = Number(dd);
+  const month = Number(mm);
+  if (Number.isNaN(day) || Number.isNaN(month)) return "";
+  if (day < 1 || day > 31 || month < 1 || month > 12) return "";
+
+  // Assume 20xx for two-digit year
+  return `20${yy}-${mm}-${dd}`;
 }
 
 async function fetchCuts() {
@@ -122,73 +129,140 @@ async function fetchCuts() {
   }));
 }
 
-function buildCutsSignature(cuts) {
-  if (!Array.isArray(cuts) || cuts.length === 0) {
-    return "empty";
-  }
+// ── Status polling ────────────────────────────────────────────────
 
-  const sorted = [...cuts].sort((a, b) => {
-    const aId = Number.isFinite(a.id) ? a.id : -1;
-    const bId = Number.isFinite(b.id) ? b.id : -1;
-    return bId - aId;
-  });
-
-  const newest = sorted[0];
-
-  return JSON.stringify({
-    count: sorted.length,
-    newestId: newest.id ?? null,
-    newestDate: newest.utc_date ?? newest.manual_date ?? "",
-    newestUtc: newest.utc_time ?? "",
-    newestLat: newest.latitude ?? null,
-    newestLon: newest.longitude ?? null
-  });
-}
-
-async function pollForCutUpdates() {
-  if (pollInProgress) {
-    return;
-  }
-
-  pollInProgress = true;
-
+/**
+ * Poll /api/status and update the header indicator.
+ *
+ * Shows one of:
+ *   - "Transferring data..."   (green dot, transfer in progress)
+ *   - "Last sync: X min ago"   (green dot, idle after a successful transfer)
+ *   - "Last sync failed"       (red dot, last transfer had an error)
+ *   - "No syncs yet"           (grey/red dot, server just started)
+ *   - "Hub offline"            (red dot, can't reach the API at all)
+ */
+async function fetchStatus() {
   try {
-    const previousSignature = lastCutsSignature;
+    const res = await fetch("/api/status", { cache: "no-store" });
+    if (!res.ok) return;
+    const status = await res.json();
 
-    await fetchCuts();
+    const dot = document.getElementById("connection-status-dot");
+    const text = document.getElementById("connection-status-text");
 
-    const newSignature = buildCutsSignature(cutsData);
-
-    if (newSignature !== previousSignature) {
-      lastCutsSignature = newSignature;
-
-      renderTable();
-
-      if (document.querySelector(".tab-content.active")?.id === "map-tab") {
-        updateMap(getCutsSorted());
+    if (status.transfer_active) {
+      dot.className = "connected";
+      text.textContent = "Transferring data...";
+    } else if (status.last_transfer_time) {
+      if (status.last_transfer_ok === false) {
+        dot.className = "disconnected";
+        text.textContent = "Last sync failed";
+      } else {
+        dot.className = "connected";
+        const ago = Math.floor(Date.now() / 1000 - status.last_transfer_time);
+        if (ago < 60) {
+          text.textContent = "Last sync: just now";
+        } else if (ago < 3600) {
+          const mins = Math.floor(ago / 60);
+          text.textContent = `Last sync: ${mins} min ago`;
+        } else if (ago < 86400) {
+          const hrs = Math.floor(ago / 3600);
+          text.textContent = `Last sync: ${hrs} hr ago`;
+        } else {
+          const days = Math.floor(ago / 86400);
+          text.textContent = `Last sync: ${days}d ago`;
+        }
       }
+    } else {
+      dot.className = "disconnected";
+      text.textContent = "No syncs yet";
     }
   } catch (err) {
-    console.error("Polling failed:", err);
-  } finally {
-    pollInProgress = false;
+    // Can't reach the server at all
+    const dot = document.getElementById("connection-status-dot");
+    const text = document.getElementById("connection-status-text");
+    if (dot) dot.className = "disconnected";
+    if (text) text.textContent = "Hub offline";
   }
 }
 
+// ── Sorting & filtering ───────────────────────────────────────────
+
 function toSortKey(cut) {
-  const datePart =
-    (cut.utc_date && cut.utc_date !== "0000-00-00" && cut.utc_date !== "00-00-0000")
-      ? String(cut.utc_date)
-      : "0000-00-00";
-
-  const timeRaw = (cut.utc_time == null) ? "" : String(cut.utc_time);
-  const timePart = timeRaw.split(".")[0].padStart(6, "0");
-
-  return `${datePart} ${timePart}`;
+  const dateISO = utcDateToISO(cut.utc_date);   // "YYYY-MM-DD" or ""
+  const raw = (cut.utc_time == null) ? "" : String(cut.utc_time);
+  const timeKey = raw.split(".")[0].padStart(6, "0");
+  return `${dateISO} ${timeKey}`;
 }
 
-function getCutsSorted() {
-  return [...cutsData].sort((a, b) => toSortKey(b).localeCompare(toSortKey(a)));
+/**
+ * Return cuts filtered by the date range inputs and sorted newest-first.
+ * If no date filters are set, returns all cuts sorted.
+ */
+function getFilteredCuts() {
+  const startInput = document.getElementById("timestamp-start");
+  const endInput = document.getElementById("timestamp-end");
+
+  const startValue = startInput ? startInput.value : "";  // "YYYY-MM-DD" or ""
+  const endValue = endInput ? endInput.value : "";
+
+  let filtered = cutsData;
+
+  // Only filter if at least one date is set
+  if (startValue || endValue) {
+    filtered = cutsData.filter(cut => {
+      const isoDate = utcDateToISO(cut.utc_date);
+
+      // If the cut has no date, exclude it when filtering is active
+      if (!isoDate) return false;
+
+      if (startValue && isoDate < startValue) return false;
+      if (endValue && isoDate > endValue) return false;
+      return true;
+    });
+  }
+
+  return [...filtered].sort((a, b) => toSortKey(b).localeCompare(toSortKey(a)));
+}
+
+/**
+ * Convert a user-entered date string into GPS DDMMYY format.
+ * Accepts: "MM/DD/YYYY", "MM-DD-YYYY", "YYYY-MM-DD" (from <input type="date">)
+ * Returns: "DDMMYY" string, or "" if unparseable.
+ */
+function userDateToDDMMYY(input) {
+  if (!input) return "";
+  const raw = input.trim();
+
+  let mm, dd, yyyy;
+
+  if (raw.includes("/")) {
+    // MM/DD/YYYY
+    const parts = raw.split("/");
+    if (parts.length !== 3) return "";
+    [mm, dd, yyyy] = parts;
+  } else if (raw.length === 10 && raw[4] === "-") {
+    // YYYY-MM-DD (ISO / <input type="date">)
+    const parts = raw.split("-");
+    if (parts.length !== 3) return "";
+    [yyyy, mm, dd] = parts;
+  } else if (raw.includes("-")) {
+    // MM-DD-YYYY
+    const parts = raw.split("-");
+    if (parts.length !== 3) return "";
+    [mm, dd, yyyy] = parts;
+  } else {
+    return "";
+  }
+
+  const day = Number(dd);
+  const month = Number(mm);
+  const year = Number(yyyy);
+  if (Number.isNaN(day) || Number.isNaN(month) || Number.isNaN(year)) return "";
+  if (day < 1 || day > 31 || month < 1 || month > 12) return "";
+
+  const yy = String(year).slice(-2);
+  return String(day).padStart(2, "0") + String(month).padStart(2, "0") + yy;
 }
 
 function clearAddCutMessage() {
@@ -207,29 +281,6 @@ function showAddCutMessage(kind, text) {
   if (kind === "success") msgEl.classList.add("success");
 }
 
-function normalizeManualDateToIso(dateStr) {
-  if (!dateStr) {
-    return "";
-  }
-
-  const trimmed = String(dateStr).trim();
-
-  const slashParts = trimmed.split("/");
-  if (slashParts.length === 3) {
-    const [month, day, year] = slashParts;
-    if (month && day && year) {
-      return `${year.padStart(4, "0")}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
-    }
-  }
-
-  const dashParts = trimmed.split("-");
-  if (dashParts.length === 3) {
-    return trimmed;
-  }
-
-  return "";
-}
-
 async function addCutFromForm() {
   const dateInput = document.getElementById("add-cut-date");
   const latInput = document.getElementById("add-cut-lat");
@@ -244,8 +295,6 @@ async function addCutFromForm() {
   }
 
   const dateRaw = dateInput.value.trim();
-  const utcDateIso = normalizeManualDateToIso(dateRaw);
-
   const lat = Number.parseFloat(latInput.value);
   const lon = Number.parseFloat(lonInput.value);
   const utcRaw = utcInput.value.trim();
@@ -257,14 +306,16 @@ async function addCutFromForm() {
     return;
   }
 
-  if (dateRaw && !utcDateIso) {
-    showAddCutMessage("error", "Date must be in MM/DD/YYYY format.");
-    return;
-  }
-
   if (lat < MAP_BOUNDS.minLat || lat > MAP_BOUNDS.maxLat ||
       lon < MAP_BOUNDS.minLon || lon > MAP_BOUNDS.maxLon) {
     showAddCutMessage("error", "Lat/Lon must be inside the Florida map bounds.");
+    return;
+  }
+
+  // Convert user date (MM/DD/YYYY or similar) to GPS format (DDMMYY)
+  const dateConverted = userDateToDDMMYY(dateRaw);
+  if (dateRaw && !dateConverted) {
+    showAddCutMessage("error", "Date format not recognized. Use MM/DD/YYYY.");
     return;
   }
 
@@ -278,8 +329,8 @@ async function addCutFromForm() {
     body.hdop = hdopVal;
   }
 
-  if (utcDateIso) {
-    body.utc_date = utcDateIso;
+  if (dateConverted) {
+    body.date = dateConverted;
   }
 
   try {
@@ -295,6 +346,7 @@ async function addCutFromForm() {
       throw new Error(`POST /api/cuts failed: ${res.status}`);
     }
 
+    // Try to read the newly created ID so we can reflect the row immediately.
     let newId = null;
     try {
       const json = await res.json();
@@ -302,7 +354,7 @@ async function addCutFromForm() {
         newId = json.id;
       }
     } catch {
-      // Ignore JSON parse failure.
+      // If parsing fails, we'll still add a row without an ID.
     }
 
     dateInput.value = "";
@@ -311,9 +363,11 @@ async function addCutFromForm() {
     utcInput.value = "";
     hdopInput.value = "";
 
+    // Instead of re-fetching from the server (which doesn't yet persist the date),
+    // append a client-side cut so the date shows up immediately in the list.
     const newCut = {
       id: newId,
-      utc_date: utcDateIso || "",
+      utc_date: dateConverted || "",
       utc_time: utcRaw || "0",
       latitude: lat,
       longitude: normalizeLonForBounds(lon),
@@ -322,14 +376,12 @@ async function addCutFromForm() {
       geoid_height: 0.0,
       hdop: Number.isNaN(hdopVal) ? 0.0 : hdopVal,
       num_satellites: 0,
-      manual_date: dateRaw || "",
     };
 
     cutsData = [...cutsData, newCut];
-    lastCutsSignature = buildCutsSignature(cutsData);
 
     renderTable();
-    updateMap(getCutsSorted());
+    updateMap(getFilteredCuts());
 
     showAddCutMessage("success", "Cut added.");
   } catch (err) {
@@ -386,10 +438,14 @@ function hdopToRadiusAndOpacity(hdopRaw) {
     };
   }
 
+  // Clamp HDOP to a sane range so outliers don't dominate.
   const hdop = Math.min(HDOP_MAX, Math.max(HDOP_MIN, hdopRaw));
-  const t = (hdop - HDOP_MIN) / (HDOP_MAX - HDOP_MIN);
+
+  // Map HDOP linearly to radius: lower HDOP -> smaller radius, higher HDOP -> larger.
+  const t = (hdop - HDOP_MIN) / (HDOP_MAX - HDOP_MIN); // 0..1
   const radius = HDOP_MIN_RADIUS + t * (HDOP_MAX_RADIUS - HDOP_MIN_RADIUS);
 
+  // Slightly reduce fill opacity for worse HDOP so bad points look softer.
   const opacityMin = 0.4;
   const opacityMax = DEFAULT_FILL_OPACITY;
   const fillOpacity = opacityMax - t * (opacityMax - opacityMin);
@@ -404,20 +460,18 @@ function updateMap(cuts) {
   cutLayer.clearLayers();
 
   const totalCutsValue = document.getElementById("total-cuts-value");
-  if (totalCutsValue) {
-    totalCutsValue.textContent = cuts.length.toString();
-  }
+  totalCutsValue.textContent = cuts.length.toString();
 
   if (!cuts.length) return;
 
   for (const cut of cuts) {
     const [lat, lon] = clampLatLon(cut.latitude, cut.longitude);
     const etTime = utcTimeToET(cut.utc_time);
-    const dateDisplay = formatUtcDateForDisplay(cut.utc_date) || cut.manual_date || "";
+    const dateDisplay = utcDateToISO(cut.utc_date);
 
     const popupHtml =
       `<b>Cut ID: ${cut.id ?? ""}</b><br>` +
-      `Date: ${dateDisplay}<br>` +
+      (dateDisplay ? `Date: ${dateDisplay}<br>` : "") +
       `ET Time: ${etTime || ""}<br>` +
       `Lat: ${lat.toFixed(6)}<br>` +
       `Lon: ${lon.toFixed(6)}<br>` +
@@ -430,6 +484,7 @@ function updateMap(cuts) {
         typeof cut.hdop === "number" &&
         !Number.isNaN(cut.hdop) &&
         cut.hdop > 0) {
+      // In HDOP mode, treat hdop as an exact radius in meters.
       L.circle([lat, lon], {
         radius: cut.hdop,
         weight: 1,
@@ -438,6 +493,7 @@ function updateMap(cuts) {
         .bindPopup(popupHtml)
         .addTo(cutLayer);
     } else {
+      // Normal mode or missing/invalid HDOP: fall back to pixel-based marker.
       L.circleMarker([lat, lon], {
         radius: DEFAULT_MARKER_RADIUS,
         weight: 2,
@@ -453,15 +509,10 @@ function renderTable() {
   const tbody = document.getElementById("cut-log-body");
   const totalCutsValue = document.getElementById("total-cuts-value");
 
-  if (!tbody) return;
-
   tbody.innerHTML = "";
 
-  const cuts = getCutsSorted();
-
-  if (totalCutsValue) {
-    totalCutsValue.textContent = cuts.length.toString();
-  }
+  const cuts = getFilteredCuts();
+  totalCutsValue.textContent = cuts.length.toString();
 
   for (const cut of cuts) {
     const tr = document.createElement("tr");
@@ -487,7 +538,7 @@ function renderTable() {
       : (cut.hdop ?? "");
 
     const etTime = utcTimeToET(cut.utc_time);
-    const dateDisplay = formatUtcDateForDisplay(cut.utc_date) || cut.manual_date || "";
+    const dateDisplay = utcDateToISO(cut.utc_date);
 
     tr.innerHTML = `
       <td><input type="checkbox" class="cut-select-checkbox" value="${cut.id ?? ""}"></td>
@@ -530,35 +581,65 @@ async function deleteSelectedCuts() {
     }
 
     await fetchCuts();
-    lastCutsSignature = buildCutsSignature(cutsData);
-
     renderTable();
-    updateMap(getCutsSorted());
+    updateMap(getFilteredCuts());
   } catch (err) {
     console.error(err);
   }
 }
 
+// ── Polling loop ──────────────────────────────────────────────────
+
+let pollTimer = null;
+const POLL_INTERVAL = 5000;   // 5 seconds
+let _lastCutsJSON = "";       // track whether data actually changed
+
+async function pollLoop() {
+  try {
+    await fetchCuts();
+
+    // Only re-render if the data actually changed — avoids
+    // stomping on filter inputs mid-edit and applying filters
+    // before the user clicks the Filter button.
+    const newJSON = JSON.stringify(cutsData);
+    if (newJSON !== _lastCutsJSON) {
+      _lastCutsJSON = newJSON;
+      renderTable();
+
+      if (document.querySelector(".tab-content.active")?.id === "map-tab") {
+        updateMap(getFilteredCuts());
+      }
+    }
+  } catch (err) {
+    console.error("Polling failed:", err);
+  }
+
+  // Also poll status
+  await fetchStatus();
+
+  // Schedule next poll
+  pollTimer = setTimeout(pollLoop, POLL_INTERVAL);
+}
+
+// ── Init ──────────────────────────────────────────────────────────
+
 async function initDashboard() {
+  // Set initial status to unknown — fetchStatus() will update it
   const statusDot = document.getElementById("connection-status-dot");
   const statusText = document.getElementById("connection-status-text");
-
-  if (statusDot) {
-    statusDot.classList.add("connected");
-  }
-
-  if (statusText) {
-    statusText.textContent = "Connected to Shears";
-  }
+  if (statusDot) statusDot.className = "disconnected";
+  if (statusText) statusText.textContent = "Connecting...";
 
   try {
     await fetchCuts();
+    _lastCutsJSON = JSON.stringify(cutsData);
   } catch (err) {
     console.error(err);
     cutsData = [];
   }
 
-  lastCutsSignature = buildCutsSignature(cutsData);
+  // Fetch status right away
+  await fetchStatus();
 
   const tabButtons = document.querySelectorAll(".tab-button");
   const tabContents = document.querySelectorAll(".tab-content");
@@ -576,8 +657,9 @@ async function initDashboard() {
       if (targetId === "log-tab") {
         renderTable();
       } else if (targetId === "map-tab") {
-        updateMap(getCutsSorted());
+        updateMap(getFilteredCuts());
 
+        // Leaflet needs a kick when the map tab is shown
         setTimeout(() => {
           if (map) map.invalidateSize();
         }, 50);
@@ -585,12 +667,13 @@ async function initDashboard() {
     });
   });
 
+  // Filter button — applies date range filter to table and map
   const filterButton = document.getElementById("filter-button");
   if (filterButton) {
     filterButton.addEventListener("click", () => {
       renderTable();
       if (document.querySelector(".tab-content.active")?.id === "map-tab") {
-        updateMap(getCutsSorted());
+        updateMap(getFilteredCuts());
       }
     });
   }
@@ -626,7 +709,7 @@ async function initDashboard() {
     });
 
     if (document.querySelector(".tab-content.active")?.id === "map-tab") {
-      updateMap(getCutsSorted());
+      updateMap(getFilteredCuts());
     }
   }
 
@@ -646,11 +729,8 @@ async function initDashboard() {
 
   renderTable();
 
-  if (pollTimer !== null) {
-    clearInterval(pollTimer);
-  }
-
-  pollTimer = setInterval(pollForCutUpdates, POLL_INTERVAL_MS);
+  // Start the polling loop for live data + status updates
+  pollTimer = setTimeout(pollLoop, POLL_INTERVAL);
 }
 
 document.addEventListener("DOMContentLoaded", initDashboard);
