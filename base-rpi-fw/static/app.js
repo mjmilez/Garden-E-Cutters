@@ -467,7 +467,8 @@ function updateMap(cuts) {
   for (const cut of cuts) {
     const [lat, lon] = clampLatLon(cut.latitude, cut.longitude);
     const etTime = utcTimeToET(cut.utc_time);
-    const dateDisplay = utcDateToISO(cut.utc_date);
+    const isoDate = utcDateToISO(cut.utc_date);
+    const dateDisplay = isoDate ? isoDate.slice(5, 7) + "/" + isoDate.slice(8, 10) + "/" + isoDate.slice(0, 4) : "";
 
     const popupHtml =
       `<b>Cut ID: ${cut.id ?? ""}</b><br>` +
@@ -538,7 +539,8 @@ function renderTable() {
       : (cut.hdop ?? "");
 
     const etTime = utcTimeToET(cut.utc_time);
-    const dateDisplay = utcDateToISO(cut.utc_date);
+    const isoDate = utcDateToISO(cut.utc_date);
+    const dateDisplay = isoDate ? isoDate.slice(5, 7) + "/" + isoDate.slice(8, 10) + "/" + isoDate.slice(0, 4) : "";
 
     tr.innerHTML = `
       <td><input type="checkbox" class="cut-select-checkbox" value="${cut.id ?? ""}"></td>
