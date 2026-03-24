@@ -8,6 +8,8 @@ cd "$repoDir"
 # Handle network mode (hotspot or AP)
 bash "$repoDir/start_network.sh"
 
+sleep 5
+
 # If we have internet, sync git
 if ping -c 1 -W 3 8.8.8.8 > /dev/null 2>&1; then
     echo "[boot] Syncing to origin/$branchName..."
