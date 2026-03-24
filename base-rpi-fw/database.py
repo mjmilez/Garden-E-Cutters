@@ -258,7 +258,7 @@ def purge_expired_deleted(hours=48):
         log.info("Purged %d expired soft-deleted point(s) (older than %d hours)", purged, hours)
     return purged
 
-def insert_cut(lat, lng, timestamp=None, hdop=None):
+def insert_cut(lat, lng, timestamp=None, hdop=None, utc_date=None):
     """
     Insert a single cut record for dev/testing.
     - utc_time defaults to "0" if not provided
@@ -271,7 +271,9 @@ def insert_cut(lat, lng, timestamp=None, hdop=None):
         timestamp = "0"
     if hdop is None:
         hdop = 0.0
-
+    if utc_date is None:
+        utc_date = "0000-00-00"
+        
     altitude = 73.0
 
     conn = get_connection()
@@ -280,7 +282,7 @@ def insert_cut(lat, lng, timestamp=None, hdop=None):
            (utc_date, utc_time, latitude, longitude, fix_quality,
             num_satellites, hdop, altitude, geoid_height)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-        ("00-00-0000", timestamp, lat, lng, 0, 0, hdop, altitude, 0.0)
+        (utc_date, timestamp, lat, lng, 0, 0, hdop, altitude, 0.0)
     )
     conn.commit()
     new_id = cursor.lastrowid

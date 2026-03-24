@@ -47,6 +47,7 @@ log = logging.getLogger("uart_rx")
 
 _transfer_active = False
 _last_transfer_ok = None
+_last_transfer_time = None
 _total_transfers = 0
 _lock = threading.Lock()
 
@@ -57,6 +58,7 @@ def get_status():
         return {
             "transfer_active": _transfer_active,
             "last_transfer_ok": _last_transfer_ok,
+            "last_transfer_time": _last_transfer_time,
             "total_transfers": _total_transfers,
         }
 
@@ -240,7 +242,7 @@ def _receiver_loop(port, baud):
         RECEIVING → recv DATA → send ACK → RECEIVING
         RECEIVING → recv END → send ACK → verify → send COMMIT → IDLE
     """
-    global _transfer_active, _last_transfer_ok, _total_transfers
+    global _transfer_active, _last_transfer_ok, _last_transfer_time, _total_transfers
 
     log.info("UART receiver starting on %s @ %d baud", port, baud)
 
@@ -334,6 +336,7 @@ def _receiver_loop(port, baud):
                             with _lock:
                                 _transfer_active = False
                                 _last_transfer_ok = transfer_ok
+                                _last_transfer_time = time.time()
                                 _total_transfers += 1
 
                             break   # back to outer loop, wait for next START

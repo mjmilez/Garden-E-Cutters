@@ -211,6 +211,7 @@ def api_cuts_compat():
         lng = data.get('lng')
         timestamp = data.get('timestamp')
         hdop = data.get('hdop')
+        utc_date = data.get('date')
 
         if lat is None or lng is None:
             return jsonify({"error": "lat and lng are required"}), 400
@@ -221,6 +222,7 @@ def api_cuts_compat():
                 float(lng),
                 timestamp,
                 float(hdop) if hdop is not None else None,
+                utc_date,
             )
             return jsonify({"success": True, "id": new_id}), 201
         except Exception as e:
