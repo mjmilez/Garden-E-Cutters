@@ -33,6 +33,15 @@ const HDOP_MAX_RADIUS = 30;
 let mapMode = "normal";
 
 let cutsData = [];
+let deletedCutsData = [];
+const DELETED_RETENTION_HOURS = 48;
+const DELETED_RETENTION_MS = DELETED_RETENTION_HOURS * 60 * 60 * 1000;
+const API_PORT = "80";
+let apiOrigin = `${window.location.protocol}//${window.location.hostname}:${API_PORT}`;
+
+async function apiFetch(path, options = {}) {
+  return fetch(`${apiOrigin}${path}`, options);
+}
 
 // Leaflet state
 let map = null;
@@ -114,7 +123,7 @@ function utcDateToISO(utcDate) {
 }
 
 async function fetchCuts() {
-  const res = await fetch("/api/cuts", { cache: "no-store" });
+  const res = await apiFetch("/api/cuts", { cache: "no-store" });
   if (!res.ok) throw new Error(`GET /api/cuts failed: ${res.status}`);
 
   const apiCuts = await res.json();
@@ -135,6 +144,60 @@ async function fetchCuts() {
   }));
 }
 
+function parseDeletedAtToMs(deletedAt) {
+  if (!deletedAt) return Number.NaN;
+  const raw = String(deletedAt).trim();
+  if (!raw) return Number.NaN;
+
+  // SQLite CURRENT_TIMESTAMP is "YYYY-MM-DD HH:MM:SS" in UTC.
+  const isoLike = raw.includes("T") ? raw : raw.replace(" ", "T");
+  const utcValue = isoLike.endsWith("Z") ? isoLike : `${isoLike}Z`;
+  const parsed = Date.parse(utcValue);
+  return Number.isNaN(parsed) ? Number.NaN : parsed;
+}
+
+function getRetainedDeletedCuts() {
+  const now = Date.now();
+  return deletedCutsData.filter(cut => {
+    if (!cut.deleted_at) return false;
+    const deletedAtMs = parseDeletedAtToMs(cut.deleted_at);
+    if (Number.isNaN(deletedAtMs)) return false;
+    return now - deletedAtMs <= DELETED_RETENTION_MS;
+  });
+}
+
+function formatTimeRemainingFromDeletedAt(deletedAt) {
+  const deletedAtMs = parseDeletedAtToMs(deletedAt);
+  if (Number.isNaN(deletedAtMs)) return "";
+
+  const expiresAt = deletedAtMs + DELETED_RETENTION_MS;
+  const remainingMs = Math.max(0, expiresAt - Date.now());
+  const totalMinutes = Math.ceil(remainingMs / 60000);
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  return `${hours}h ${String(minutes).padStart(2, "0")}m`;
+}
+
+async function fetchDeletedCuts() {
+  const res = await apiFetch("/api/points/deleted", { cache: "no-store" });
+  if (!res.ok) throw new Error(`GET /api/points/deleted failed: ${res.status}`);
+
+  const apiCuts = await res.json();
+  deletedCutsData = (Array.isArray(apiCuts) ? apiCuts : []).map(row => ({
+    id: row.id,
+    utc_date: row.utc_date ?? "",
+    utc_time: row.utc_time,
+    latitude: Number(row.latitude),
+    longitude: normalizeLonForBounds(Number(row.longitude)),
+    altitude: row.altitude != null ? Number(row.altitude) : null,
+    fix_quality: row.fix_quality != null ? Number(row.fix_quality) : null,
+    geoid_height: row.geoid_height != null ? Number(row.geoid_height) : null,
+    hdop: row.hdop != null ? Number(row.hdop) : null,
+    num_satellites: row.num_satellites != null ? Number(row.num_satellites) : null,
+    deleted_at: row.deleted_at ?? "",
+  }));
+}
+
 // ── Status polling ────────────────────────────────────────────────
 
 /**
@@ -149,7 +212,7 @@ async function fetchCuts() {
  */
 async function fetchStatus() {
   try {
-    const res = await fetch("/api/status", { cache: "no-store" });
+    const res = await apiFetch("/api/status", { cache: "no-store" });
     if (!res.ok) return;
     const status = await res.json();
 
@@ -340,7 +403,7 @@ async function addCutFromForm() {
   }
 
   try {
-    const res = await fetch("/api/cuts", {
+    const res = await apiFetch("/api/cuts", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -563,6 +626,116 @@ function renderTable() {
     `;
     tbody.appendChild(tr);
   }
+
+  updateSelectAllCheckboxState("cut-select-all-checkbox", ".cut-select-checkbox");
+}
+
+function renderDeletedTable() {
+  const tbody = document.getElementById("deleted-cut-log-body");
+  if (!tbody) return;
+
+  tbody.innerHTML = "";
+  const retainedCuts = getRetainedDeletedCuts();
+
+  for (const cut of retainedCuts) {
+    const tr = document.createElement("tr");
+
+    const lat = (typeof cut.latitude === "number" && !Number.isNaN(cut.latitude))
+      ? cut.latitude.toFixed(6)
+      : "";
+
+    const lon = (typeof cut.longitude === "number" && !Number.isNaN(cut.longitude))
+      ? cut.longitude.toFixed(6)
+      : "";
+
+    const etTime = utcTimeToET(cut.utc_time);
+    const isoDate = utcDateToISO(cut.utc_date);
+    const dateDisplay = isoDate ? isoDate.slice(5, 7) + "/" + isoDate.slice(8, 10) + "/" + isoDate.slice(0, 4) : "";
+    const expiresIn = formatTimeRemainingFromDeletedAt(cut.deleted_at);
+
+    tr.innerHTML = `
+      <td><input type="checkbox" class="deleted-cut-select-checkbox" value="${cut.id ?? ""}"></td>
+      <td>${cut.id ?? ""}</td>
+      <td>${dateDisplay}</td>
+      <td>${etTime || (cut.utc_time ?? "")}</td>
+      <td>${lat}</td>
+      <td>${lon}</td>
+      <td>${expiresIn}</td>
+    `;
+    tbody.appendChild(tr);
+  }
+
+  updateSelectAllCheckboxState("deleted-cut-select-all-checkbox", ".deleted-cut-select-checkbox");
+}
+
+function updateSelectAllCheckboxState(selectAllId, itemSelector) {
+  const selectAll = document.getElementById(selectAllId);
+  if (!selectAll) return;
+
+  const items = Array.from(document.querySelectorAll(itemSelector));
+  const checkedCount = items.filter(cb => cb.checked).length;
+
+  if (!items.length) {
+    selectAll.checked = false;
+    selectAll.indeterminate = false;
+    return;
+  }
+
+  selectAll.checked = checkedCount === items.length;
+  selectAll.indeterminate = checkedCount > 0 && checkedCount < items.length;
+}
+
+function setAllCheckboxes(itemSelector, checked) {
+  const items = document.querySelectorAll(itemSelector);
+  items.forEach(cb => {
+    cb.checked = checked;
+  });
+}
+
+function escapeCsvValue(value) {
+  const str = value == null ? "" : String(value);
+  if (str.includes(",") || str.includes("\"") || str.includes("\n")) {
+    return `"${str.replace(/"/g, "\"\"")}"`;
+  }
+  return str;
+}
+
+function buildCutsCsv(cuts) {
+  const header = [
+    "id", "utc_date", "utc_time", "latitude", "longitude",
+    "fix_quality", "num_satellites", "hdop", "altitude", "geoid_height",
+  ];
+  const lines = [header.join(",")];
+
+  for (const cut of cuts) {
+    const row = [
+      cut.id ?? "",
+      cut.utc_date ?? "",
+      cut.utc_time ?? "",
+      cut.latitude ?? "",
+      cut.longitude ?? "",
+      cut.fix_quality ?? "",
+      cut.num_satellites ?? "",
+      cut.hdop ?? "",
+      cut.altitude ?? "",
+      cut.geoid_height ?? "",
+    ].map(escapeCsvValue);
+    lines.push(row.join(","));
+  }
+
+  return `${lines.join("\n")}\n`;
+}
+
+function downloadTextFile(filename, content, mimeType = "text/plain;charset=utf-8") {
+  const blob = new Blob([content], { type: mimeType });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
 }
 
 async function deleteSelectedCuts() {
@@ -576,7 +749,7 @@ async function deleteSelectedCuts() {
   }
 
   try {
-    const res = await fetch("/api/points/delete", {
+    const res = await apiFetch("/api/points/delete", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -589,11 +762,75 @@ async function deleteSelectedCuts() {
     }
 
     await fetchCuts();
+    await fetchDeletedCuts();
     renderTable();
+    renderDeletedTable();
     updateMap(getFilteredCuts());
   } catch (err) {
     console.error(err);
   }
+}
+
+async function recoverSelectedDeletedCuts() {
+  const checkboxes = document.querySelectorAll(".deleted-cut-select-checkbox:checked");
+  const ids = Array.from(checkboxes)
+    .map(cb => Number.parseInt(cb.value, 10))
+    .filter(id => !Number.isNaN(id));
+
+  if (!ids.length) {
+    return;
+  }
+
+  try {
+    const res = await apiFetch("/api/points/restore", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ ids }),
+    });
+
+    if (!res.ok) {
+      throw new Error(`POST /api/points/restore failed: ${res.status}`);
+    }
+
+    await fetchCuts();
+    await fetchDeletedCuts();
+    renderTable();
+    renderDeletedTable();
+    updateMap(getFilteredCuts());
+
+    // After a restore, return to active cuts view.
+    setActiveTab("log-tab");
+  } catch (err) {
+    console.error(err);
+  }
+}
+
+async function downloadCsvExport() {
+  window.location.href = `${apiOrigin}/api/export`;
+}
+
+function exportSelectedCutsCsv() {
+  const selectedIds = new Set(
+    Array.from(document.querySelectorAll(".cut-select-checkbox:checked"))
+      .map(cb => Number.parseInt(cb.value, 10))
+      .filter(id => !Number.isNaN(id))
+  );
+
+  if (!selectedIds.size) {
+    return;
+  }
+
+  const selectedCuts = cutsData.filter(cut => selectedIds.has(cut.id));
+  if (!selectedCuts.length) {
+    return;
+  }
+
+  const csv = buildCutsCsv(selectedCuts);
+  const now = new Date();
+  const timestamp = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}${String(now.getDate()).padStart(2, "0")}_${String(now.getHours()).padStart(2, "0")}${String(now.getMinutes()).padStart(2, "0")}${String(now.getSeconds()).padStart(2, "0")}`;
+  downloadTextFile(`gps_export_selected_${timestamp}.csv`, csv, "text/csv;charset=utf-8");
 }
 
 // ── Polling loop ──────────────────────────────────────────────────
@@ -601,10 +838,37 @@ async function deleteSelectedCuts() {
 let pollTimer = null;
 const POLL_INTERVAL = 5000;   // 5 seconds
 let _lastCutsJSON = "";       // track whether data actually changed
+let _lastDeletedCutsJSON = "";
+
+function setActiveTab(targetId) {
+  const tabButtons = document.querySelectorAll(".tab-button");
+  const tabContents = document.querySelectorAll(".tab-content");
+
+  tabButtons.forEach(btn => {
+    const tabId = btn.getAttribute("data-tab");
+    btn.classList.toggle("active", tabId === targetId);
+  });
+
+  tabContents.forEach(section => {
+    section.classList.toggle("active", section.id === targetId);
+  });
+
+  if (targetId === "log-tab") {
+    renderTable();
+  } else if (targetId === "map-tab") {
+    updateMap(getFilteredCuts());
+    setTimeout(() => {
+      if (map) map.invalidateSize();
+    }, 50);
+  } else if (targetId === "deleted-tab") {
+    renderDeletedTable();
+  }
+}
 
 async function pollLoop() {
   try {
     await fetchCuts();
+    await fetchDeletedCuts();
 
     // Only re-render if the data actually changed — avoids
     // stomping on filter inputs mid-edit and applying filters
@@ -616,6 +880,14 @@ async function pollLoop() {
 
       if (document.querySelector(".tab-content.active")?.id === "map-tab") {
         updateMap(getFilteredCuts());
+      }
+    }
+
+    const deletedJSON = JSON.stringify(getRetainedDeletedCuts());
+    if (deletedJSON !== _lastDeletedCutsJSON) {
+      _lastDeletedCutsJSON = deletedJSON;
+      if (document.querySelector(".tab-content.active")?.id === "deleted-tab") {
+        renderDeletedTable();
       }
     }
   } catch (err) {
@@ -640,38 +912,24 @@ async function initDashboard() {
 
   try {
     await fetchCuts();
+    await fetchDeletedCuts();
     _lastCutsJSON = JSON.stringify(cutsData);
+    _lastDeletedCutsJSON = JSON.stringify(getRetainedDeletedCuts());
   } catch (err) {
     console.error(err);
     cutsData = [];
+    deletedCutsData = [];
   }
 
   // Fetch status right away
   await fetchStatus();
 
   const tabButtons = document.querySelectorAll(".tab-button");
-  const tabContents = document.querySelectorAll(".tab-content");
 
   tabButtons.forEach(btn => {
     btn.addEventListener("click", () => {
-      tabButtons.forEach(b => b.classList.remove("active"));
-      btn.classList.add("active");
-
       const targetId = btn.getAttribute("data-tab");
-      tabContents.forEach(section => {
-        section.classList.toggle("active", section.id === targetId);
-      });
-
-      if (targetId === "log-tab") {
-        renderTable();
-      } else if (targetId === "map-tab") {
-        updateMap(getFilteredCuts());
-
-        // Leaflet needs a kick when the map tab is shown
-        setTimeout(() => {
-          if (map) map.invalidateSize();
-        }, 50);
-      }
+      setActiveTab(targetId);
     });
   });
 
@@ -699,6 +957,64 @@ async function initDashboard() {
     deleteSelectedButton.addEventListener("click", (evt) => {
       evt.preventDefault();
       deleteSelectedCuts();
+    });
+  }
+
+  const cutSelectAll = document.getElementById("cut-select-all-checkbox");
+  if (cutSelectAll) {
+    cutSelectAll.addEventListener("change", () => {
+      setAllCheckboxes(".cut-select-checkbox", cutSelectAll.checked);
+      updateSelectAllCheckboxState("cut-select-all-checkbox", ".cut-select-checkbox");
+    });
+  }
+
+  const deletedSelectAll = document.getElementById("deleted-cut-select-all-checkbox");
+  if (deletedSelectAll) {
+    deletedSelectAll.addEventListener("change", () => {
+      setAllCheckboxes(".deleted-cut-select-checkbox", deletedSelectAll.checked);
+      updateSelectAllCheckboxState("deleted-cut-select-all-checkbox", ".deleted-cut-select-checkbox");
+    });
+  }
+
+  const cutLogBody = document.getElementById("cut-log-body");
+  if (cutLogBody) {
+    cutLogBody.addEventListener("change", (evt) => {
+      if (evt.target instanceof HTMLElement && evt.target.matches(".cut-select-checkbox")) {
+        updateSelectAllCheckboxState("cut-select-all-checkbox", ".cut-select-checkbox");
+      }
+    });
+  }
+
+  const deletedLogBody = document.getElementById("deleted-cut-log-body");
+  if (deletedLogBody) {
+    deletedLogBody.addEventListener("change", (evt) => {
+      if (evt.target instanceof HTMLElement && evt.target.matches(".deleted-cut-select-checkbox")) {
+        updateSelectAllCheckboxState("deleted-cut-select-all-checkbox", ".deleted-cut-select-checkbox");
+      }
+    });
+  }
+
+  const recoverDeletedButton = document.getElementById("recover-selected-button");
+  if (recoverDeletedButton) {
+    recoverDeletedButton.addEventListener("click", (evt) => {
+      evt.preventDefault();
+      recoverSelectedDeletedCuts();
+    });
+  }
+
+  const exportCsvButton = document.getElementById("export-csv-button");
+  if (exportCsvButton) {
+    exportCsvButton.addEventListener("click", (evt) => {
+      evt.preventDefault();
+      downloadCsvExport();
+    });
+  }
+
+  const exportSelectedCsvButton = document.getElementById("export-selected-csv-button");
+  if (exportSelectedCsvButton) {
+    exportSelectedCsvButton.addEventListener("click", (evt) => {
+      evt.preventDefault();
+      exportSelectedCutsCsv();
     });
   }
 
@@ -736,6 +1052,7 @@ async function initDashboard() {
   }
 
   renderTable();
+  renderDeletedTable();
 
   // Start the polling loop for live data + status updates
   pollTimer = setTimeout(pollLoop, POLL_INTERVAL);
