@@ -8,6 +8,14 @@ AP_IP="192.168.4.1"
 MAX_RETRIES=5
 RETRY_DELAY=3
 
+# Check if NM already connected
+sleep 15
+CURRENT_IP=$(ip -4 addr show wlan0 2>/dev/null | grep -oP 'inet \K[0-9.]+' || true)
+if [ -n "$CURRENT_IP" ] && [ "$CURRENT_IP" != "$AP_IP" ]; then
+	echo "[net] Already connected to WiFi - skipping scan"
+	exit 0
+fi
+
 echo "[net] Stopping AP services..."
 sudo systemctl stop hostapd 2>/dev/null || true
 sudo systemctl stop ap-static-ip 2>/dev/null || true
