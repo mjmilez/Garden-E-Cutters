@@ -1,6 +1,7 @@
 [Unit]
 Description=Base App Service
-After=network.target
+After=NetworkManager.service
+Wants=NetworkManager.service
 
 [Service]
 Type=simple
