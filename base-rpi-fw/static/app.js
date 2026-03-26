@@ -474,7 +474,8 @@ function initLeafletMapIfNeeded() {
 
   if (USE_ONLINE_TILES) {
     L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-      maxZoom: 19,
+      maxZoom: 22,
+      maxNativeZoom: 19,
       attribution: "&copy; OpenStreetMap contributors"
     }).addTo(map);
   } else {
