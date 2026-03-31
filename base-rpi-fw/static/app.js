@@ -1063,7 +1063,7 @@ async function initDashboard() {
     });
   }
 
-  initLeafletMapIfNeeded();
+  await initLeafletMapIfNeeded();
   renderTable();
   renderDeletedTable();
 
