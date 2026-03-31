@@ -231,6 +231,7 @@ def api_cuts_compat():
         lng = data.get('lng')
         timestamp = data.get('timestamp')
         hdop = data.get('hdop')
+        fix_quality = data.get('fix_quality')
         utc_date = data.get('date')
 
         if lat is None or lng is None:
@@ -243,6 +244,7 @@ def api_cuts_compat():
                 timestamp,
                 float(hdop) if hdop is not None else None,
                 utc_date,
+                int(fix_quality) if fix_quality is not None else None,
             )
             return jsonify({"success": True, "id": new_id}), 201
         except Exception as e:
