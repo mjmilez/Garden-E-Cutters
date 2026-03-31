@@ -8,10 +8,9 @@
  *   - Point Leaflet at your local tile server (or pre-rendered tiles)
  */
 
-const USE_ONLINE_TILES = true;
 const LOCAL_TILE_URL = "/tiles/{z}/{x}/{y}.png";
-const LOCAL_MIN_ZOOM = 4;
-const LOCAL_MAX_ZOOM = 12;
+const LOCAL_MIN_ZOOM = 15;
+const LOCAL_MAX_ZOOM = 19;
 
 const MAP_BOUNDS = {
   // Florida (rough bbox)
@@ -47,6 +46,18 @@ async function apiFetch(path, options = {}) {
 let map = null;
 let cutLayer = null;
 let mapInitialized = false;
+
+async function canReachInternet() {
+    try {
+        const resp = await fetch("https://tile.openstreetmap.org/0/0/0.png", {
+            mode: "no-cors",
+            cache: "no-store",
+        });
+        return true;
+    } catch {
+        return false;
+    }
+}
 
 // If longitude comes in positive but our bounds are negative (US), flip it.
 function normalizeLonForBounds(lon) {
@@ -459,7 +470,7 @@ async function addCutFromForm() {
   }
 }
 
-function initLeafletMapIfNeeded() {
+async function initLeafletMapIfNeeded() {
   if (mapInitialized) return;
 
   const mapDiv = document.getElementById("leaflet-map");
@@ -472,18 +483,21 @@ function initLeafletMapIfNeeded() {
 
   map = L.map("leaflet-map", { zoomControl: true });
 
-  if (USE_ONLINE_TILES) {
-    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-      maxZoom: 22,
-      maxNativeZoom: 19,
-      attribution: "&copy; OpenStreetMap contributors"
-    }).addTo(map);
+  const online = await canReachInternet();
+
+  if (online) {
+      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+          maxZoom: 22,
+          maxNativeZoom: 19,
+          attribution: "&copy; OpenStreetMap contributors"
+      }).addTo(map);
   } else {
-    L.tileLayer(LOCAL_TILE_URL, {
-      minZoom: LOCAL_MIN_ZOOM,
-      maxZoom: LOCAL_MAX_ZOOM,
-      attribution: "Offline tiles"
-    }).addTo(map);
+      L.tileLayer(LOCAL_TILE_URL, {
+          minZoom: LOCAL_MIN_ZOOM,
+          maxZoom: 22,
+          maxNativeZoom: LOCAL_MAX_ZOOM,
+          attribution: "Offline tiles"
+      }).addTo(map);
   }
 
   cutLayer = L.layerGroup().addTo(map);
@@ -524,7 +538,6 @@ function hdopToRadiusAndOpacity(hdopRaw) {
 }
 
 function updateMap(cuts) {
-  initLeafletMapIfNeeded();
   if (!map || !cutLayer) return;
 
   cutLayer.clearLayers();
@@ -1052,6 +1065,7 @@ async function initDashboard() {
     });
   }
 
+  initLeafletMapIfNeeded();
   renderTable();
   renderDeletedTable();
 

@@ -76,6 +76,26 @@ def start_purge_thread():
 
 # ── Routes ─────────────────────────────────────────────────────────
 
+@app.route("/tiles/<int:z>/<int:x>/<int:y>.png")
+def serve_tile(z, x, y):
+    """Serve offline map tiles from the MBTiles file."""
+    import sqlite3 as _sqlite3
+    tms_y = (2 ** z) - 1 - y
+    try:
+        conn = _sqlite3.connect("uf_campus.mbtiles")
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT tile_data FROM tiles WHERE zoom_level=? AND tile_column=? AND tile_row=?",
+            (z, x, tms_y),
+        )
+        row = cursor.fetchone()
+        conn.close()
+        if row:
+            return Response(row[0], mimetype="image/png")
+        return Response(status=404)
+    except Exception:
+        return Response(status=404)
+
 @app.route("/")
 def index():
     return app.send_static_file("index.html")
