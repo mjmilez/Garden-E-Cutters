@@ -24,12 +24,15 @@ const MAP_BOUNDS = {
 const DEFAULT_MARKER_RADIUS = 6;
 const DEFAULT_FILL_OPACITY = 0.8;
 
-const HDOP_MIN = 0.1;
-const HDOP_MAX = 10;
-const HDOP_MIN_RADIUS = 2;
-const HDOP_MAX_RADIUS = 30;
+const FIX_QUALITY_RADIUS_METERS = {
+  1: 5,      // 2D/3D
+  2: 2,      // DGNSS
+  4: 0.03,   // RTK Fixed
+  5: 0.8,    // RTK Float
+  6: 0,      // Dead Reckoning (not attained)
+};
 
-// "normal" = current behavior, "hdop" = bubble size/opacity driven by HDOP
+// "normal" = default marker, "fix" = bubble size driven by fix quality
 let mapMode = "normal";
 
 let cutsData = [];
@@ -354,18 +357,21 @@ async function addCutFromForm() {
   const dateInput = document.getElementById("add-cut-date");
   const latInput = document.getElementById("add-cut-lat");
   const lonInput = document.getElementById("add-cut-lon");
+  const fixQualityInput = document.getElementById("add-cut-fix-quality");
   const utcInput = document.getElementById("add-cut-utc");
   const hdopInput = document.getElementById("add-cut-hdop");
 
   clearAddCutMessage();
 
-  if (!dateInput || !latInput || !lonInput || !utcInput || !hdopInput) {
+  if (!dateInput || !latInput || !lonInput || !fixQualityInput || !utcInput || !hdopInput) {
     return;
   }
 
   const dateRaw = dateInput.value.trim();
   const lat = Number.parseFloat(latInput.value);
   const lon = Number.parseFloat(lonInput.value);
+  const fixQualityRaw = fixQualityInput.value.trim();
+  const fixQualityVal = fixQualityRaw === "" ? 0 : Number.parseInt(fixQualityRaw, 10);
   const utcRaw = utcInput.value.trim();
   const hdopRaw = hdopInput.value.trim();
   const hdopVal = hdopRaw === "" ? Number.NaN : Number.parseFloat(hdopRaw);
@@ -381,6 +387,11 @@ async function addCutFromForm() {
     return;
   }
 
+  if (Number.isNaN(fixQualityVal) || fixQualityVal < 0 || fixQualityVal > 6) {
+    showAddCutMessage("error", "Fix Type must be an integer from 0 to 6.");
+    return;
+  }
+
   // Convert user date (MM/DD/YYYY or similar) to GPS format (DDMMYY)
   const dateConverted = userDateToDDMMYY(dateRaw);
   if (dateRaw && !dateConverted) {
@@ -392,6 +403,7 @@ async function addCutFromForm() {
     lat,
     lng: lon,
     timestamp: utcRaw || "0",
+    fix_quality: fixQualityVal,
   };
 
   if (!Number.isNaN(hdopVal)) {
@@ -429,6 +441,7 @@ async function addCutFromForm() {
     dateInput.value = "";
     latInput.value = "";
     lonInput.value = "";
+  fixQualityInput.value = "";
     utcInput.value = "";
     hdopInput.value = "";
 
@@ -441,7 +454,7 @@ async function addCutFromForm() {
       latitude: lat,
       longitude: normalizeLonForBounds(lon),
       altitude: 73.0,
-      fix_quality: 0,
+      fix_quality: fixQualityVal,
       geoid_height: 0.0,
       hdop: Number.isNaN(hdopVal) ? 0.0 : hdopVal,
       num_satellites: 0,
@@ -500,27 +513,13 @@ function clampLatLon(lat, lon) {
   return [clampedLat, clampedLon];
 }
 
-function hdopToRadiusAndOpacity(hdopRaw) {
-  if (typeof hdopRaw !== "number" || Number.isNaN(hdopRaw)) {
-    return {
-      radius: DEFAULT_MARKER_RADIUS,
-      fillOpacity: DEFAULT_FILL_OPACITY
-    };
-  }
-
-  // Clamp HDOP to a sane range so outliers don't dominate.
-  const hdop = Math.min(HDOP_MAX, Math.max(HDOP_MIN, hdopRaw));
-
-  // Map HDOP linearly to radius: lower HDOP -> smaller radius, higher HDOP -> larger.
-  const t = (hdop - HDOP_MIN) / (HDOP_MAX - HDOP_MIN); // 0..1
-  const radius = HDOP_MIN_RADIUS + t * (HDOP_MAX_RADIUS - HDOP_MIN_RADIUS);
-
-  // Slightly reduce fill opacity for worse HDOP so bad points look softer.
-  const opacityMin = 0.4;
-  const opacityMax = DEFAULT_FILL_OPACITY;
-  const fillOpacity = opacityMax - t * (opacityMax - opacityMin);
-
-  return { radius, fillOpacity };
+function fixQualityToAccuracyRadiusMeters(fixQualityRaw) {
+  const fixCode = Number(fixQualityRaw);
+  if (!Number.isInteger(fixCode)) return null;
+  if (!(fixCode in FIX_QUALITY_RADIUS_METERS)) return null;
+  const radius = FIX_QUALITY_RADIUS_METERS[fixCode];
+  if (typeof radius !== "number" || Number.isNaN(radius) || radius <= 0) return null;
+  return radius;
 }
 
 function updateMap(cuts) {
@@ -540,6 +539,7 @@ function updateMap(cuts) {
     const isoDate = utcDateToISO(cut.utc_date);
     const dateDisplay = isoDate ? isoDate.slice(5, 7) + "/" + isoDate.slice(8, 10) + "/" + isoDate.slice(0, 4) : "";
 
+    const accuracyRadiusMeters = fixQualityToAccuracyRadiusMeters(cut.fix_quality);
     const popupHtml =
       `<b>Cut ID: ${cut.id ?? ""}</b><br>` +
       (dateDisplay ? `Date: ${dateDisplay}<br>` : "") +
@@ -548,23 +548,21 @@ function updateMap(cuts) {
       `Lon: ${lon.toFixed(6)}<br>` +
       `Alt: ${cut.altitude ?? ""}<br>` +
       `Fix: ${cut.fix_quality ?? ""}<br>` +
-      `HDOP: ${cut.hdop ?? ""}<br>` +
+      (accuracyRadiusMeters != null ? `Fix Accuracy: ${accuracyRadiusMeters} m<br>` : "") +
+      `HDOP (Telemetry): ${cut.hdop ?? ""}<br>` +
       `Sats: ${cut.num_satellites ?? ""}`;
 
-    if (mapMode === "hdop" &&
-        typeof cut.hdop === "number" &&
-        !Number.isNaN(cut.hdop) &&
-        cut.hdop > 0) {
-      // In HDOP mode, treat hdop as an exact radius in meters.
+    if (mapMode === "fix" && accuracyRadiusMeters != null) {
+      // In Fix Type mode, render fix-quality-derived accuracy in meters.
       L.circle([lat, lon], {
-        radius: cut.hdop,
+        radius: accuracyRadiusMeters,
         weight: 1,
         fillOpacity: 0.3
       })
         .bindPopup(popupHtml)
         .addTo(cutLayer);
     } else {
-      // Normal mode or missing/invalid HDOP: fall back to pixel-based marker.
+      // Normal mode or unknown/invalid fix: fall back to pixel-based marker.
       L.circleMarker([lat, lon], {
         radius: DEFAULT_MARKER_RADIUS,
         weight: 2,
@@ -1020,8 +1018,8 @@ async function initDashboard() {
   }
 
   const mapModeNormalBtn = document.getElementById("map-mode-normal");
-  const mapModeHdopBtn = document.getElementById("map-mode-hdop");
-  const mapModeButtons = [mapModeNormalBtn, mapModeHdopBtn].filter(Boolean);
+  const mapModeFixBtn = document.getElementById("map-mode-fix");
+  const mapModeButtons = [mapModeNormalBtn, mapModeFixBtn].filter(Boolean);
 
   function setMapMode(newMode) {
     mapMode = newMode;
@@ -1029,7 +1027,7 @@ async function initDashboard() {
       if (!btn) return;
       const isActive =
         (newMode === "normal" && btn.id === "map-mode-normal") ||
-        (newMode === "hdop" && btn.id === "map-mode-hdop");
+        (newMode === "fix" && btn.id === "map-mode-fix");
       btn.classList.toggle("map-mode-active", isActive);
     });
 
@@ -1045,10 +1043,10 @@ async function initDashboard() {
     });
   }
 
-  if (mapModeHdopBtn) {
-    mapModeHdopBtn.addEventListener("click", (evt) => {
+  if (mapModeFixBtn) {
+    mapModeFixBtn.addEventListener("click", (evt) => {
       evt.preventDefault();
-      setMapMode("hdop");
+      setMapMode("fix");
     });
   }
 
