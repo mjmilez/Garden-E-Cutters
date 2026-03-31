@@ -66,8 +66,12 @@
             <input type="number" id="add-cut-lon" step="0.000001" />
           </label>
           <label>
-            HDOP
-            <input type="number" id="add-cut-hdop" step="0.01" placeholder="0 (default)" />
+            Fix Type
+            <input type="number" id="add-cut-fix-quality" step="1" min="0" max="6" placeholder="0-6" />
+          </label>
+          <label>
+            HDOP (Telemetry)
+            <input type="number" id="add-cut-hdop" step="0.01" placeholder="optional" />
           </label>
           <label>
             UTC Time (HHMMSS)
@@ -91,7 +95,7 @@
             <th>Altitude</th>
             <th>Fix Quality</th>
             <th>Geoid Height</th>
-            <th>HDOP</th>
+            <th>HDOP (Telemetry)</th>
             <th># Satellites</th>
           </tr>
         </thead>
@@ -103,7 +107,7 @@
       <div id="map-mode-toggle">
         <span id="map-mode-label">Map Mode:</span>
         <button id="map-mode-normal" class="map-mode-button map-mode-active">Normal</button>
-        <button id="map-mode-hdop" class="map-mode-button">HDOP</button>
+        <button id="map-mode-fix" class="map-mode-button">Fix Type</button>
       </div>
 
       <!-- Leaflet needs a real element with a height -->
