@@ -1063,7 +1063,11 @@ async function initDashboard() {
     });
   }
 
-  await initLeafletMapIfNeeded();
+  try {
+    await initLeafletMapIfNeeded();
+  } catch (err) {
+    console.error("Map init failed:", err);
+  }
   renderTable();
   renderDeletedTable();
 
