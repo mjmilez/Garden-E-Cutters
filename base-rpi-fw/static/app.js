@@ -515,9 +515,13 @@ async function initLeafletMapIfNeeded() {
 
   cutLayer = L.layerGroup().addTo(map);
 
-  map.fitBounds(bounds);
-  map.setMaxBounds(bounds.pad(0.25));
-
+  if (online) {
+    map.fitBounds(bounds);
+    map.setMaxBounds(bounds.pad(0.25));
+  } else {
+    map.setView([29.6450, -82.3525], 17);
+  }
+  
   mapInitialized = true;
 }
 
