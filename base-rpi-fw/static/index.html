@@ -2,135 +2,246 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Garden E-Cutters Dashboard</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="style.css" />
-
-  <!-- Leaflet (CDN for browser testing) -->
   <link rel="stylesheet" href="leaflet.css" />
 </head>
-<body>
-  <!-- Top bar -->
-  <header id="top-bar">
-    <h1>GARDEN E-CUTTERS</h1>
-    <div id="status-bar">
-      <span id="connection-status-dot"></span>
-      <span id="connection-status-text">Disconnected from Shears</span>
-      <span id="total-cuts-label">Total Cuts:</span>
-      <span id="total-cuts-value">0</span>
-    </div>
-  </header>
-
-  <!-- Tabs -->
-  <nav id="tabs">
-    <button class="tab-button active" data-tab="log-tab">Logs</button>
-    <button class="tab-button" data-tab="map-tab">Map</button>
-    <button class="tab-button" data-tab="deleted-tab">Deleted</button>
-  </nav>
-
-  <!-- Tab content containers -->
-  <main>
-    <section id="log-tab" class="tab-content active">
-      <!-- Filters -->
-      <div id="log-filters">
-        <button id="filter-button">Filter</button>
-        <button id="delete-selected-button">Delete Selected</button>
-        <button id="export-csv-button">Export CSV</button>
-        <button id="export-selected-csv-button">Export Selected CSV</button>
-
-        <label>
-          Timestamp Range:
-          <input type="date" id="timestamp-start" />
-          <input type="date" id="timestamp-end" />
-        </label>
+<body class="app-body">
+  <div class="app-shell">
+    <!-- Sidebar -->
+    <aside class="sidebar" aria-label="Main navigation">
+      <div class="sidebar-brand">
+        <div class="sidebar-unit">Field Unit 01</div>
+        <div class="sidebar-system">SYSTEM ACTIVE</div>
       </div>
 
-      <!-- Add Cut panel -->
-      <section id="add-cut-panel">
-        <h2>Add Cut (Manual)</h2>
-        <div class="add-cut-row">
-          <label>
-            Date (MM/DD/YYYY)
-            <input type="text" id="add-cut-date" placeholder="mm/dd/yyyy" />
-          </label>
-          <label>
-            Lat
-            <input type="number" id="add-cut-lat" step="0.000001" />
-          </label>
-          <label>
-            Lon
-            <input type="number" id="add-cut-lon" step="0.000001" />
-          </label>
-          <label>
-            Fix Type
-            <input type="number" id="add-cut-fix-quality" step="1" min="0" max="6" placeholder="0-6" />
-          </label>
-          <label>
-            HDOP (Telemetry)
-            <input type="number" id="add-cut-hdop" step="0.01" placeholder="optional" />
-          </label>
-          <label>
-            UTC Time (HHMMSS)
-            <input type="text" id="add-cut-utc" placeholder="0 = default" />
-          </label>
-          <button id="add-cut-button">Add Cut</button>
+      <nav class="sidebar-nav" id="tabs">
+        <button type="button" class="tab-button tab-button--nav active" data-tab="log-tab">
+          <svg class="tab-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" />
+          </svg>
+          <span>LOGS</span>
+        </button>
+        <button type="button" class="tab-button tab-button--nav" data-tab="map-tab">
+          <svg class="tab-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <circle cx="12" cy="12" r="10" />
+            <path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20M2 12h20" />
+          </svg>
+          <span>MAP</span>
+        </button>
+        <button type="button" class="tab-button tab-button--nav" data-tab="deleted-tab">
+          <svg class="tab-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M10 11v6M14 11v6" />
+          </svg>
+          <span>DELETED</span>
+        </button>
+      </nav>
+    </aside>
+
+    <!-- Main column -->
+    <div class="main-column">
+      <header id="top-bar">
+        <h1>Garden E-Cutters</h1>
+        <div class="top-bar-right">
+          <div id="status-bar" class="status-pill-wrap">
+            <span id="connection-status-dot" class="status-dot" aria-hidden="true"></span>
+            <span id="connection-status-text" class="status-text">Connecting...</span>
+          </div>
+          <div class="top-bar-icons" aria-hidden="true">
+            <span class="top-icon" title="Sync">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+            </span>
+            <span class="top-icon" title="Signal">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 20h.01M7 20v-4M12 20V10M17 20V6M22 20V2"/></svg>
+            </span>
+            <span class="top-icon" title="Power">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="16" height="10" rx="2"/><path d="M22 11v2"/></svg>
+            </span>
+          </div>
         </div>
-        <p id="add-cut-message" aria-live="polite"></p>
-      </section>
+      </header>
 
-      <!-- Log table -->
-      <table id="cut-log-table">
-        <thead>
-          <tr>
-            <th><input type="checkbox" id="cut-select-all-checkbox" aria-label="Select all active cuts" /></th>
-            <th>ID</th>
-            <th>Date</th>
-            <th>UTC Time</th>
-            <th>Latitude</th>
-            <th>Longitude</th>
-            <th>Altitude</th>
-            <th>Fix Quality</th>
-            <th>Geoid Height</th>
-            <th>HDOP (Telemetry)</th>
-            <th># Satellites</th>
-          </tr>
-        </thead>
-        <tbody id="cut-log-body"></tbody>
-      </table>
-    </section>
+      <main class="workspace">
+        <!-- Logs tab -->
+        <section id="log-tab" class="tab-content active">
+          <div class="logs-layout">
+            <div class="logs-top-grid">
+              <section class="card card--metrics" aria-labelledby="session-metrics-heading">
+                <div class="card-kicker" id="session-metrics-heading">SESSION METRICS</div>
+                <div class="session-metric-main">
+                  <span class="session-metric-value" id="total-cuts-value">0</span>
+                  <div class="session-metric-caption">
+                    <span id="total-cuts-label">TOTAL FILTERED CUTS</span>
+                  </div>
+                </div>
+                <div class="session-badges">
+                  <span class="badge badge--live">LIVE FEED</span>
+                  <span class="badge badge--gps" id="gps-lock-badge">GPS LOCKED</span>
+                </div>
+              </section>
 
-    <section id="map-tab" class="tab-content">
-      <div id="map-mode-toggle">
-        <span id="map-mode-label">Map Mode:</span>
-        <button id="map-mode-normal" class="map-mode-button map-mode-active">Normal</button>
-        <button id="map-mode-fix" class="map-mode-button">Fix Type</button>
-      </div>
+              <section class="card card--manual" id="add-cut-panel">
+                <h2 class="card-title-manual">MANUAL ENTRY</h2>
+                <div class="manual-grid">
+                  <label class="field-underline">
+                    <span class="field-label">Date (MM/DD/YYYY)</span>
+                    <input type="text" id="add-cut-date" placeholder="mm/dd/yyyy" autocomplete="off" />
+                  </label>
+                  <label class="field-underline">
+                    <span class="field-label">UTC Time (HHMMSS)</span>
+                    <input type="text" id="add-cut-utc" placeholder="0 = default" autocomplete="off" />
+                  </label>
+                  <label class="field-underline">
+                    <span class="field-label">Latitude</span>
+                    <input type="number" id="add-cut-lat" step="0.000001" placeholder="0.000000" />
+                  </label>
+                  <label class="field-underline">
+                    <span class="field-label">Longitude</span>
+                    <input type="number" id="add-cut-lon" step="0.000001" placeholder="0.000000" />
+                  </label>
+                  <label class="field-underline">
+                    <span class="field-label">Fix Type</span>
+                    <input type="number" id="add-cut-fix-quality" step="1" min="0" max="6" placeholder="0–6" />
+                  </label>
+                  <label class="field-underline">
+                    <span class="field-label">HDOP (Telemetry)</span>
+                    <input type="number" id="add-cut-hdop" step="0.01" placeholder="optional" />
+                  </label>
+                </div>
+                <button type="button" id="add-cut-button" class="btn-add-record">ADD RECORD</button>
+                <p id="add-cut-message" class="add-cut-message" aria-live="polite"></p>
+              </section>
+            </div>
 
-      <!-- Leaflet needs a real element with a height -->
-      <div id="leaflet-map"></div>
-    </section>
+            <div class="card card--table-block">
+              <div class="logs-toolbar" id="log-filters">
+                <div class="logs-toolbar-dates">
+                  <label class="date-field">
+                    <span class="date-field-label">START</span>
+                    <input type="date" id="timestamp-start" />
+                  </label>
+                  <label class="date-field">
+                    <span class="date-field-label">END</span>
+                    <input type="date" id="timestamp-end" />
+                  </label>
+                  <button type="button" id="filter-button" class="btn-icon-filter" aria-label="Apply date filter" title="Filter">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
+                  </button>
+                </div>
+                <div class="logs-toolbar-actions">
+                  <button type="button" id="delete-selected-button" class="btn-toolbar btn-toolbar--danger">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                    DELETE
+                  </button>
+                  <button type="button" id="export-csv-button" class="btn-toolbar btn-toolbar--muted">EXPORT ALL</button>
+                  <button type="button" id="export-selected-csv-button" class="btn-toolbar btn-toolbar--primary">EXPORT SELECTED</button>
+                </div>
+              </div>
 
-    <section id="deleted-tab" class="tab-content">
-      <div id="deleted-controls">
-        <button id="recover-selected-button">Recover Selected</button>
-        <span id="deleted-retention-note">Deleted cuts are kept for 48 hours.</span>
-      </div>
+              <div class="table-scroll">
+                <table id="cut-log-table" class="data-table">
+                  <thead>
+                    <tr>
+                      <th class="th-check"><input type="checkbox" id="cut-select-all-checkbox" aria-label="Select all active cuts" /></th>
+                      <th>ID</th>
+                      <th>TIMESTAMP</th>
+                      <th>COORDINATES</th>
+                      <th>FIX Q</th>
+                      <th>HDOP</th>
+                      <th>SATELLITES</th>
+                      <th>STATUS</th>
+                    </tr>
+                  </thead>
+                  <tbody id="cut-log-body"></tbody>
+                </table>
+              </div>
 
-      <table id="deleted-cut-log-table">
-        <thead>
-          <tr>
-            <th><input type="checkbox" id="deleted-cut-select-all-checkbox" aria-label="Select all deleted cuts" /></th>
-            <th>ID</th>
-            <th>Date</th>
-            <th>UTC Time</th>
-            <th>Latitude</th>
-            <th>Longitude</th>
-            <th>Expires In</th>
-          </tr>
-        </thead>
-        <tbody id="deleted-cut-log-body"></tbody>
-      </table>
-    </section>
-  </main>
+              <div class="logs-table-footer">
+                <span id="logs-pagination-info" class="pagination-info">Showing 0 of 0 entries</span>
+                <div class="pagination-arrows" aria-hidden="true">
+                  <button type="button" class="page-arrow" disabled tabindex="-1">‹</button>
+                  <button type="button" class="page-arrow" disabled tabindex="-1">›</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Map tab -->
+        <section id="map-tab" class="tab-content tab-content--map">
+          <div class="subview subview--map">
+            <header class="view-page-header">
+              <p class="view-kicker">FIELD VISUALIZATION</p>
+              <h2 class="view-title">Field map</h2>
+              <p class="view-subtitle">Markers use the same date filter as Logs. Coverage is limited to Florida.</p>
+            </header>
+
+            <div class="card card--map">
+              <div class="map-toolbar-wrap">
+                <div id="map-mode-toggle" class="map-toolbar">
+                  <span id="map-mode-label" class="map-toolbar-label">Map mode</span>
+                  <div class="map-mode-buttons">
+                    <button type="button" id="map-mode-normal" class="map-mode-button map-mode-active">Normal</button>
+                    <button type="button" id="map-mode-fix" class="map-mode-button">Fix Type</button>
+                  </div>
+                  <span class="map-toolbar-hint" title="Normal: point markers. Fix Type: accuracy circles from fix quality.">i</span>
+                </div>
+              </div>
+              <div id="leaflet-map" class="leaflet-map-host" role="application" aria-label="Cut locations map"></div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Deleted tab -->
+        <section id="deleted-tab" class="tab-content tab-content--deleted">
+          <div class="subview subview--deleted">
+            <header class="view-page-header">
+              <p class="view-kicker">DATA RETENTION</p>
+              <h2 class="view-title">Deleted cuts</h2>
+              <p class="view-subtitle">Items below can be recovered within 48 hours of deletion.</p>
+            </header>
+
+            <div class="card card--deleted-block">
+              <div id="deleted-controls" class="deleted-toolbar">
+                <button type="button" id="recover-selected-button" class="btn-toolbar btn-toolbar--primary btn-toolbar--with-icon">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                    <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
+                    <path d="M3 3v5h5"/>
+                  </svg>
+                  RECOVER SELECTED
+                </button>
+                <span id="deleted-retention-note" class="deleted-note-badge">
+                  <span class="deleted-note-icon" aria-hidden="true">⏱</span>
+                  Retention: 48 hours from deletion
+                </span>
+              </div>
+              <div class="table-scroll">
+                <table id="deleted-cut-log-table" class="data-table data-table--deleted">
+                  <thead>
+                    <tr>
+                      <th class="th-check"><input type="checkbox" id="deleted-cut-select-all-checkbox" aria-label="Select all deleted cuts" /></th>
+                      <th>ID</th>
+                      <th>TIMESTAMP</th>
+                      <th>COORDINATES</th>
+                      <th>EXPIRES IN</th>
+                    </tr>
+                  </thead>
+                  <tbody id="deleted-cut-log-body"></tbody>
+                </table>
+              </div>
+              <div class="deleted-table-footer">
+                <span id="deleted-pagination-info" class="pagination-info">Showing 0 deleted cuts</span>
+              </div>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+  </div>
 
   <script src="leaflet.js"></script>
   <script src="app.js"></script>

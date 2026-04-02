@@ -278,6 +278,51 @@ function toSortKey(cut) {
   return `${dateISO} ${timeKey}`;
 }
 
+/** Display label for fix quality (NMEA-style codes). */
+function fixQualityToShortLabel(fix) {
+  const map = {
+    0: "0 — No fix",
+    1: "1 — 2D/3D",
+    2: "2 — DGNSS",
+    3: "3 — GPS + SBAS",
+    4: "4 — RTK Fixed",
+    5: "5 — RTK Float",
+    6: "6 — Dead reckoning"
+  };
+  const n = Number(fix);
+  if (fix == null || fix === "" || Number.isNaN(n)) return "—";
+  return map[n] != null ? map[n] : `${n}`;
+}
+
+/** CSS modifier classes for fix-quality pills (Stitch-style). */
+function fixQualityPillClass(fix) {
+  const n = Number(fix);
+  if (Number.isNaN(n)) return "fix-pill fix-pill--neutral";
+  if (n === 4) return "fix-pill fix-pill--rtk";
+  if (n === 2) return "fix-pill fix-pill--dgps";
+  return "fix-pill fix-pill--neutral";
+}
+
+function updateLogsPaginationInfo(count) {
+  const el = document.getElementById("logs-pagination-info");
+  if (!el) return;
+  if (count === 0) {
+    el.textContent = "Showing 0 of 0 entries";
+  } else {
+    el.textContent = `Showing 1–${count} of ${count} entries`;
+  }
+}
+
+function updateDeletedPaginationInfo(count) {
+  const el = document.getElementById("deleted-pagination-info");
+  if (!el) return;
+  if (count === 0) {
+    el.textContent = "No deleted cuts in retention window";
+  } else {
+    el.textContent = `Showing ${count} recoverable cut${count === 1 ? "" : "s"}`;
+  }
+}
+
 /**
  * Return cuts filtered by the date range inputs and sorted newest-first.
  * If no date filters are set, returns all cuts sorted.
@@ -546,7 +591,8 @@ function updateMap(cuts) {
   cutLayer.clearLayers();
 
   const totalCutsValue = document.getElementById("total-cuts-value");
-  totalCutsValue.textContent = cuts.length.toString();
+  if (totalCutsValue) totalCutsValue.textContent = cuts.length.toString();
+  updateLogsPaginationInfo(cuts.length);
 
   if (!cuts.length) return;
 
@@ -598,7 +644,17 @@ function renderTable() {
   tbody.innerHTML = "";
 
   const cuts = getFilteredCuts();
-  totalCutsValue.textContent = cuts.length.toString();
+  const n = cuts.length;
+  if (totalCutsValue) totalCutsValue.textContent = n.toString();
+  updateLogsPaginationInfo(n);
+
+  const pinSvg =
+    '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">' +
+    '<path d="M12 21s-8-4.5-8-11a8 8 0 1 1 16 0c0 6.5-8 11-8 11z"/><circle cx="12" cy="10" r="3"/></svg>';
+
+  const checkSvg =
+    '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">' +
+    '<path d="M20 6L9 17l-5-5"/></svg>';
 
   for (const cut of cuts) {
     const tr = document.createElement("tr");
@@ -611,14 +667,6 @@ function renderTable() {
       ? cut.longitude.toFixed(6)
       : "";
 
-    const altitude = (typeof cut.altitude === "number" && !Number.isNaN(cut.altitude))
-      ? cut.altitude.toFixed(2)
-      : (cut.altitude ?? "");
-
-    const geoid = (typeof cut.geoid_height === "number" && !Number.isNaN(cut.geoid_height))
-      ? cut.geoid_height.toFixed(2)
-      : (cut.geoid_height ?? "");
-
     const hdop = (typeof cut.hdop === "number" && !Number.isNaN(cut.hdop))
       ? cut.hdop.toFixed(2)
       : (cut.hdop ?? "");
@@ -626,19 +674,33 @@ function renderTable() {
     const etTime = utcTimeToET(cut.utc_time);
     const isoDate = utcDateToISO(cut.utc_date);
     const dateDisplay = isoDate ? isoDate.slice(5, 7) + "/" + isoDate.slice(8, 10) + "/" + isoDate.slice(0, 4) : "";
+    const timeLine = etTime || String(cut.utc_time ?? "").split(".")[0] || "";
+
+    const fixLabel = fixQualityToShortLabel(cut.fix_quality);
+    const fixClass = fixQualityPillClass(cut.fix_quality);
+
+    const idDisplay = cut.id != null ? `#${cut.id}` : "—";
 
     tr.innerHTML = `
       <td><input type="checkbox" class="cut-select-checkbox" value="${cut.id ?? ""}"></td>
-      <td>${cut.id ?? ""}</td>
-      <td>${dateDisplay}</td>
-      <td>${etTime || (cut.utc_time ?? "")}</td>
-      <td>${lat}</td>
-      <td>${lon}</td>
-      <td>${altitude}</td>
-      <td>${cut.fix_quality ?? ""}</td>
-      <td>${geoid}</td>
-      <td>${hdop}</td>
-      <td>${cut.num_satellites ?? ""}</td>
+      <td class="cell-id">${idDisplay}</td>
+      <td>
+        <span class="cell-ts-date">${dateDisplay || "—"}</span>
+        <span class="cell-ts-time">${timeLine || "—"}</span>
+      </td>
+      <td>
+        <div class="cell-coords">
+          ${pinSvg}
+          <div class="coord-lines">
+            <span>${lat || "—"}</span>
+            <span>${lon || "—"}</span>
+          </div>
+        </div>
+      </td>
+      <td><span class="${fixClass}">${fixLabel}</span></td>
+      <td class="cell-hdop">${hdop}</td>
+      <td class="cell-sats">${cut.num_satellites ?? ""}</td>
+      <td class="status-check">${checkSvg}</td>
     `;
     tbody.appendChild(tr);
   }
@@ -652,6 +714,11 @@ function renderDeletedTable() {
 
   tbody.innerHTML = "";
   const retainedCuts = getRetainedDeletedCuts();
+  updateDeletedPaginationInfo(retainedCuts.length);
+
+  const pinSvg =
+    '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">' +
+    '<path d="M12 21s-8-4.5-8-11a8 8 0 1 1 16 0c0 6.5-8 11-8 11z"/><circle cx="12" cy="10" r="3"/></svg>';
 
   for (const cut of retainedCuts) {
     const tr = document.createElement("tr");
@@ -667,16 +734,27 @@ function renderDeletedTable() {
     const etTime = utcTimeToET(cut.utc_time);
     const isoDate = utcDateToISO(cut.utc_date);
     const dateDisplay = isoDate ? isoDate.slice(5, 7) + "/" + isoDate.slice(8, 10) + "/" + isoDate.slice(0, 4) : "";
+    const timeLine = etTime || String(cut.utc_time ?? "").split(".")[0] || "";
     const expiresIn = formatTimeRemainingFromDeletedAt(cut.deleted_at);
+    const idDisplay = cut.id != null ? `#${cut.id}` : "—";
 
     tr.innerHTML = `
       <td><input type="checkbox" class="deleted-cut-select-checkbox" value="${cut.id ?? ""}"></td>
-      <td>${cut.id ?? ""}</td>
-      <td>${dateDisplay}</td>
-      <td>${etTime || (cut.utc_time ?? "")}</td>
-      <td>${lat}</td>
-      <td>${lon}</td>
-      <td>${expiresIn}</td>
+      <td class="cell-id">${idDisplay}</td>
+      <td>
+        <span class="cell-ts-date">${dateDisplay || "—"}</span>
+        <span class="cell-ts-time">${timeLine || "—"}</span>
+      </td>
+      <td>
+        <div class="cell-coords">
+          ${pinSvg}
+          <div class="coord-lines">
+            <span>${lat || "—"}</span>
+            <span>${lon || "—"}</span>
+          </div>
+        </div>
+      </td>
+      <td><span class="expires-pill">${expiresIn || "—"}</span></td>
     `;
     tbody.appendChild(tr);
   }
