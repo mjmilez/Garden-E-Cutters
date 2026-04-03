@@ -39,7 +39,7 @@
 #define GPS_UART_TX    GPIO_NUM_17
 #define GPS_BUF_SIZE   512
 
-#define LED_STATUS_PIN      GPIO_NUM_25
+#define LED_STATUS_PIN      GPIO_NUM_32
 
 #define CLEAR_HOLD_US         5000000
 #define TRIGGER_DEBOUNCE_US   400000

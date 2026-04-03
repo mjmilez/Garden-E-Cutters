@@ -14,7 +14,7 @@
 #include <stdbool.h>
 
 /* GPIO used for the shears status LED. */
-#define SHEARS_STATUS_LED_GPIO GPIO_NUM_33
+#define SHEARS_STATUS_LED_GPIO GPIO_NUM_35
 
 /* --- Public API ----------------------------------------------------------- */
 
