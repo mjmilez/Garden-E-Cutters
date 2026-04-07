@@ -18,6 +18,7 @@
 #include "shears_primeSwitch.h"
 #include "shears_gpsButtons.h"
 #include "shears_gpsStorage.h"
+#include "shears_7segment.h"
 #include "log_transfer_server.h"
 
 #include <stdint.h>
@@ -39,7 +40,7 @@
 #define GPS_UART_TX    GPIO_NUM_17
 #define GPS_BUF_SIZE   512
 
-#define LED_STATUS_PIN      GPIO_NUM_25
+#define LED_STATUS_PIN      GPIO_NUM_32
 
 #define CLEAR_HOLD_US         5000000
 #define TRIGGER_DEBOUNCE_US   400000
@@ -70,6 +71,7 @@ static void uartReadTask(void *arg);
 static void saveTask(void *arg);
 static void requestCutFeedback(void);
 static bool registerTriggerPress(void);
+static int parseGgaFixType(const char *sentence);
 
 /* ISR callbacks (wired up by shears_gpsButtons) */
 static void onPrimeLevel(int level);
@@ -136,13 +138,27 @@ static void IRAM_ATTR onCutPress(gpio_num_t pin)
 /* Helper to extract field N from an NMEA sentence (0-indexed) */
 static const char *nmeaField(const char *sentence, int fieldNum)
 {
-    const char *p = sentence;
-    for (int i = 0; i < fieldNum; i++) {
-        p = strchr(p, ',');
-        if (!p) return NULL;
-        p++;  /* skip the comma */
-    }
-    return p;
+	const char *p = sentence;
+	for (int i = 0; i < fieldNum; i++) {
+		p = strchr(p, ',');
+		if (!p) return NULL;
+		p++;
+	}
+	return p;
+}
+
+static int parseGgaFixType(const char *sentence)
+{
+	const char *field = nmeaField(sentence, 6);
+	if (!field) {
+		return 0;
+	}
+
+	if (field[0] < '0' || field[0] > '9') {
+		return 0;
+	}
+
+	return field[0] - '0';
 }
 
 static void uartReadTask(void *arg)
@@ -170,16 +186,14 @@ static void uartReadTask(void *arg)
 				if (c == '\n') {
 					nmea_buf[nmea_len] = '\0';
 
-					/* Always grab date from RMC when available */
 					if (strncmp(nmea_buf, "$GNRMC,", 7) == 0) {
 						const char *dateField = nmeaField(nmea_buf, 9);
 						if (dateField && dateField[0] != ',' && dateField[0] != '*') {
 							strncpy(latestDate, dateField, 6);
-								latestDate[6] = '\0';
+							latestDate[6] = '\0';
 						}
 					}
 
-					/* Capture GGA sentence when requested */
 					if (captureNextGGA && strncmp(nmea_buf, "$GNGGA,", 7) == 0) {
 						strncpy(latestNmea, nmea_buf, GPS_BUF_SIZE);
 						nmeaValid = true;
@@ -228,6 +242,7 @@ static void saveTask(void *arg)
 
 			memset(latestNmea, 0, sizeof(latestNmea));
 			nmeaValid = false;
+			shears7SegmentShowFixType(0);
 
 			if (clearBeepRequested) {
 				clearBeepRequested = false;
@@ -246,7 +261,11 @@ static void saveTask(void *arg)
 				if (!saveOk) {
 					ESP_LOGW(TAG, "GPS save failed; playing no-signal feedback");
 					shearsPiezoBeepPattern(4);
+					shears7SegmentShowFixType(0);
 				} else {
+					int fixType = parseGgaFixType(latestNmea);
+
+					shears7SegmentShowFixType((uint8_t)fixType);
 					shearsGpsStoragePrintNewest(GPS_LOG_FILE_PATH, 5);
 
 					if (log_transfer_server_isConnected() &&
@@ -261,6 +280,7 @@ static void saveTask(void *arg)
 				memset(latestNmea, 0, sizeof(latestNmea));
 			} else {
 				ESP_LOGW(TAG, "Save requested but no valid NMEA data available");
+				shears7SegmentShowFixType(0);
 			}
 		}
 
@@ -295,7 +315,6 @@ static void saveTask(void *arg)
 
 void gpsLoggerInit(void)
 {
-	/* SPIFFS is mounted outside this module. Just ensure our file exists. */
 	shearsGpsStorageEnsureCsvExists(GPS_LOG_FILE_PATH);
 
 	uart_config_t uart_config = {
@@ -336,6 +355,8 @@ void gpsLoggerInit(void)
 	gpio_set_level(LED_STATUS_PIN, 1);
 
 	shearsPiezoInit();
+	shears7SegmentInit();
+	shears7SegmentShowFixType(0);
 
 	bool primed = shearsPrimeSwitchIsPrimed();
 

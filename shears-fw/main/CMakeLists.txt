@@ -10,6 +10,15 @@ idf_component_register(
         "shears_gpsStorage.c"
         "gps_logger.c"
         "log_transfer_server.c"
+        "shears_7segment.c"
     INCLUDE_DIRS
         "."
+    REQUIRES
+        log_transfer
+        bt
+        esp_driver_ledc
+        esp_driver_gpio
+        esp_driver_uart
+        spiffs
+        nvs_flash
 )

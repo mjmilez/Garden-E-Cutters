@@ -1,4 +1,5 @@
 {
     "cmake.sourceDirectory": "/wsl.localhost/Ubuntu-22.04/home/alessandro/Garden-E-Cutters/shears-fw",
-    "cmake.ignoreCMakeListsMissing": true
+    "cmake.ignoreCMakeListsMissing": true,
+    "idf.currentSetup": "C:\\esp\\v6.0\\esp-idf"
 }

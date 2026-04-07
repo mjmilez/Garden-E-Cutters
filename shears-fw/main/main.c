@@ -16,6 +16,7 @@
 #include "shears_ble.h"
 #include "shears_spiffs.h"
 #include "gps_logger.h"
+#include "shears_7segment.h"
 
 /* --- BLE connection state ------------------------------------------------- */
 
@@ -46,6 +47,8 @@ void app_main(void)
 
 	/* Start BLE peripheral mode and begin advertising. */
 	shearsBleInit(bleConnChanged);
+
+	shears7SegmentInit();
 
 	/* Foreground remains idle; work is handled by background tasks. */
 }
