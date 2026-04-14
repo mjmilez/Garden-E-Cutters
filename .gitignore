@@ -32,5 +32,16 @@ venv/
 
 # RPi hub specific
 base-rpi-fw/__pycache__/
-base-rpi-fw/recieved_files/
+base-rpi-fw/received_files/
 base-rpi-fw/watermelon_hub.db
+
+# Offline map tiles (too large for git)
+*.mbtiles
+
+# Secrets / config with credentials
+*.env
+config.local.py
+
+.DS_Store
+venv/
+base-rpi-fw/venv/
