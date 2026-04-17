@@ -1,4 +1,4 @@
-# Garden E-Cutters – Instrumented Shears
+# Garden E-Cutters
 
 ## Overview
 The Garden E-Cutters shears are a smart harvesting tool that records each cut event along with high-accuracy GPS data. When a cut is detected, the system captures an RTK-corrected GNSS position, logs the event locally, and transmits it to a base station for visualization on a live map dashboard.
